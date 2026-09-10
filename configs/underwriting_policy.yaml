@@ -1,0 +1,21 @@
+policy_name: Cyber SME Underwriting Policy
+policy_version: 0.2.0
+product_line: CYBER_SME
+
+supported_countries:
+  - Canada
+
+excluded_industries:
+  - adult entertainment
+  - cryptocurrency exchange
+  - cryptocurrency mining
+  - gambling
+  - weapons manufacturing
+
+authority:
+  max_automated_limit_cad: 2000000
+  max_automated_revenue_cad: 50000000
+  max_automated_prior_claims: 1
+
+security_controls:
+  mfa_required_for_automated_underwriting: true

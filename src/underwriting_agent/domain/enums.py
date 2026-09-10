@@ -1,0 +1,21 @@
+from enum import StrEnum
+
+
+class DecisionType(StrEnum):
+    ACCEPT = "ACCEPT"
+    ACCEPT_WITH_CONDITIONS = "ACCEPT_WITH_CONDITIONS"
+    REFER = "REFER"
+    DECLINE = "DECLINE"
+    NEED_MORE_INFORMATION = "NEED_MORE_INFORMATION"
+    PENDING_UNDERWRITING = "PENDING_UNDERWRITING"
+
+
+class RiskBand(StrEnum):
+    LOW = "LOW"
+    MEDIUM = "MEDIUM"
+    HIGH = "HIGH"
+    SEVERE = "SEVERE"
+
+
+class ProductLine(StrEnum):
+    CYBER_SME = "CYBER_SME"
