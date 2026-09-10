@@ -10,6 +10,7 @@ requires-python = ">=3.11"
 dependencies = [
     "anyio>=4.14,<4.15",
     "fastapi>=0.141.1",
+    "httpx2>=2.12.0",
     "pydantic>=2.13.5",
     "pydantic-settings>=2.15.0",
     "pyyaml>=6.0.3",
@@ -26,10 +27,10 @@ build-backend = "uv_build"
 
 [dependency-groups]
 dev = [
-    "httpx2>=2.12.0",
     "mypy>=2.3.1",
     "pre-commit>=4.6.2",
     "pytest>=9.1.1",
     "pytest-cov>=7.1.0",
     "ruff>=0.16.6",
+    "types-pyyaml>=6.0.12.20260906",
 ]

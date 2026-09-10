@@ -1,6 +1,11 @@
 from fastapi.testclient import TestClient
 
 from underwriting_agent.api.app import app
+from underwriting_agent.api.dependencies import get_underwriting_service
+from underwriting_agent.application.underwriting_service import UnderwritingService
+
+app.dependency_overrides[get_underwriting_service] = UnderwritingService
+
 
 client = TestClient(app)
 
