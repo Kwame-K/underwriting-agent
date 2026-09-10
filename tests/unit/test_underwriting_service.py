@@ -1,6 +1,32 @@
 from underwriting_agent.application.underwriting_service import UnderwritingService
-from underwriting_agent.domain.enums import DecisionType
+from underwriting_agent.domain.enums import DecisionType, RiskBand
+from underwriting_agent.domain.evidence import EvidenceCitation
+from underwriting_agent.domain.risk_score import RiskScore
+from underwriting_agent.domain.rules import RuleResult
 from underwriting_agent.domain.submission import InsuranceSubmission
+
+
+class FakeInsuranceKnowledgeAgent:
+    def retrieve_evidence(
+        self,
+        submission: InsuranceSubmission,
+        failed_rules: list[RuleResult],
+        risk_score: RiskScore | None,
+    ) -> list[EvidenceCitation]:
+        return [
+            EvidenceCitation(
+                citation_id="CIT-TEST-001",
+                source_document_id="CYBER-UW-GUIDE-TEST",
+                source_document_title="Cyber SME Underwriting Guide",
+                section_reference="Section 4.2",
+                excerpt=(
+                    "Multi-factor authentication is required for all remote "
+                    "and privileged access."
+                ),
+                relevance_score=0.95,
+                supported_finding_id="UW-CYB-003",
+            )
+        ]
 
 
 def test_incomplete_submission_requires_more_information() -> None:
@@ -136,3 +162,60 @@ def test_referred_submission_contains_risk_score() -> None:
     assert decision.risk_band is not None
     assert decision.scoring_model_version == "0.1.0"
     assert len(decision.risk_factors) == 10
+
+
+def test_referred_submission_contains_pricing_indication() -> None:
+    submission = InsuranceSubmission(
+        submission_id="SUB-UW-PRICING-001",
+        applicant_name="Retail Services Inc.",
+        country="Canada",
+        industry="Retail",
+        annual_revenue_cad=8_000_000,
+        employee_count=45,
+        handles_personal_data=True,
+        handles_payment_card_data=True,
+        mfa_enabled=False,
+        endpoint_detection_response=False,
+        offline_backups=False,
+        prior_cyber_claims=0,
+        requested_limit_cad=1_000_000,
+        requested_retention_cad=25_000,
+    )
+
+    decision = UnderwritingService().underwrite(submission)
+
+    assert decision.decision == DecisionType.REFER
+    assert decision.risk_band == RiskBand.SEVERE
+    assert decision.base_exposure_premium_cad == 24_000
+    assert decision.indicated_premium_cad == 40_800
+    assert decision.pricing_model_version == "0.1.0"
+    assert len(decision.pricing_factors) == 4
+
+
+def test_referred_submission_contains_documentary_evidence() -> None:
+    submission = InsuranceSubmission(
+        submission_id="SUB-UW-RAG-001",
+        applicant_name="Retail Services Inc.",
+        country="Canada",
+        industry="Retail",
+        annual_revenue_cad=8_000_000,
+        employee_count=45,
+        handles_personal_data=True,
+        handles_payment_card_data=True,
+        mfa_enabled=False,
+        endpoint_detection_response=False,
+        offline_backups=False,
+        prior_cyber_claims=0,
+        requested_limit_cad=1_000_000,
+        requested_retention_cad=25_000,
+    )
+
+    service = UnderwritingService(knowledge_agent=FakeInsuranceKnowledgeAgent())
+
+    decision = service.underwrite(submission)
+
+    assert decision.decision == DecisionType.REFER
+    assert len(decision.evidence) == 1
+    assert decision.evidence[0].citation_id == "CIT-TEST-001"
+    assert decision.evidence[0].supported_finding_id == "UW-CYB-003"
+    assert decision.evidence[0].relevance_score == 0.95

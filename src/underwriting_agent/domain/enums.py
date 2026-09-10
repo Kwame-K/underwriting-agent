@@ -19,3 +19,9 @@ class RiskBand(StrEnum):
 
 class ProductLine(StrEnum):
     CYBER_SME = "CYBER_SME"
+
+
+class ConditionCategory(StrEnum):
+    REQUIRED_CONTROL = "REQUIRED_CONTROL"
+    INFORMATION_REQUIRED = "INFORMATION_REQUIRED"
+    SECURITY_REVIEW = "SECURITY_REVIEW"

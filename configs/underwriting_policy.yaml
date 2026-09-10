@@ -1,5 +1,5 @@
 policy_name: Cyber SME Underwriting Policy
-policy_version: 0.2.0
+policy_version: 0.4.0
 product_line: CYBER_SME
 
 supported_countries:
@@ -19,3 +19,56 @@ authority:
 
 security_controls:
   mfa_required_for_automated_underwriting: true
+
+pricing:
+  pricing_model_version: 0.1.0
+  base_rate: 0.003
+  minimum_premium_cad: 2500
+
+  reference_limit_cad: 1000000
+  reference_retention_cad: 25000
+
+  minimum_retention_factor: 0.6
+  maximum_retention_factor: 1.5
+
+  risk_band_multipliers:
+    LOW: 0.8
+    MEDIUM: 1.0
+    HIGH: 1.3
+    SEVERE: 1.7
+
+conditions:
+  mfa_not_enabled:
+    condition_id: COND-001
+    category: REQUIRED_CONTROL
+    message: Implement multi-factor authentication for all remote and privileged access.
+
+  edr_not_confirmed:
+    condition_id: COND-002
+    category: REQUIRED_CONTROL
+    message: Provide evidence that endpoint detection and response is deployed and actively monitored.
+
+  offline_backups_not_confirmed:
+    condition_id: COND-003
+    category: REQUIRED_CONTROL
+    message: Provide evidence of tested offline or immutable backups.
+
+  payment_card_data:
+    condition_id: COND-004
+    category: INFORMATION_REQUIRED
+    message: Provide details of payment-card data processing, storage, encryption, and access controls.
+
+  prior_cyber_claims:
+    condition_id: COND-005
+    category: INFORMATION_REQUIRED
+    message: Provide details of prior cyber incidents, loss amounts, root causes, and remediation actions.
+
+  enhanced_security_review:
+    condition_id: COND-006
+    category: SECURITY_REVIEW
+    message: Complete an enhanced cybersecurity controls review before final underwriting approval.
+
+  high_limit_review:
+    condition_id: COND-007
+    category: INFORMATION_REQUIRED
+    message: Provide additional exposure details and security controls documentation for the requested insurance limit.

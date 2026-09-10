@@ -6,7 +6,7 @@ def test_default_underwriting_policy_is_loaded() -> None:
     policy = load_underwriting_policy()
 
     assert policy.policy_name == "Cyber SME Underwriting Policy"
-    assert policy.policy_version == "0.2.0"
+    assert policy.policy_version == "0.4.0"
     assert policy.product_line == ProductLine.CYBER_SME
     assert policy.supported_countries == ("Canada",)
     assert "gambling" in policy.excluded_industries
@@ -24,3 +24,10 @@ def test_default_policy_requires_mfa_for_automated_underwriting() -> None:
     policy = load_underwriting_policy()
 
     assert policy.security_controls.mfa_required_for_automated_underwriting is True
+
+
+def test_default_policy_contains_condition_templates() -> None:
+    policy = load_underwriting_policy()
+
+    assert policy.conditions.mfa_not_enabled.condition_id == "COND-001"
+    assert policy.conditions.enhanced_security_review.category == "SECURITY_REVIEW"
