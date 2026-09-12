@@ -1,6 +1,10 @@
 from underwriting_agent.application.underwriting_service import UnderwritingService
 from underwriting_agent.domain.enums import DecisionType, RiskBand
-from underwriting_agent.domain.evidence import EvidenceCitation
+from underwriting_agent.domain.evidence import (
+    EvidenceCitation,
+    EvidenceRetrievalResult,
+    EvidenceRetrievalStatus,
+)
 from underwriting_agent.domain.risk_score import RiskScore
 from underwriting_agent.domain.rules import RuleResult
 from underwriting_agent.domain.submission import InsuranceSubmission
@@ -12,21 +16,24 @@ class FakeInsuranceKnowledgeAgent:
         submission: InsuranceSubmission,
         failed_rules: list[RuleResult],
         risk_score: RiskScore | None,
-    ) -> list[EvidenceCitation]:
-        return [
-            EvidenceCitation(
-                citation_id="CIT-TEST-001",
-                source_document_id="CYBER-UW-GUIDE-TEST",
-                source_document_title="Cyber SME Underwriting Guide",
-                section_reference="Section 4.2",
-                excerpt=(
-                    "Multi-factor authentication is required for all remote "
-                    "and privileged access."
-                ),
-                relevance_score=0.95,
-                supported_finding_id="UW-CYB-003",
-            )
-        ]
+    ) -> EvidenceRetrievalResult:
+        return EvidenceRetrievalResult(
+            status=EvidenceRetrievalStatus.SUCCESS,
+            citations=[
+                EvidenceCitation(
+                    citation_id="CIT-TEST-001",
+                    source_document_id="CYBER-UW-GUIDE-TEST",
+                    source_document_title="Cyber SME Underwriting Guide",
+                    section_reference="Section 4.2",
+                    excerpt=(
+                        "Multi-factor authentication is required for all remote "
+                        "and privileged access."
+                    ),
+                    relevance_score=0.95,
+                    supported_finding_id="UW-CYB-003",
+                )
+            ],
+        )
 
 
 def test_incomplete_submission_requires_more_information() -> None:
@@ -219,3 +226,49 @@ def test_referred_submission_contains_documentary_evidence() -> None:
     assert decision.evidence[0].citation_id == "CIT-TEST-001"
     assert decision.evidence[0].supported_finding_id == "UW-CYB-003"
     assert decision.evidence[0].relevance_score == 0.95
+
+    assert decision.evidence_retrieval_status == EvidenceRetrievalStatus.SUCCESS
+    assert decision.unresolved_evidence_finding_ids == []
+    assert decision.evidence_retrieval_failure_reason is None
+
+
+class UnavailableInsuranceKnowledgeAgent:
+    def retrieve_evidence(
+        self,
+        submission: InsuranceSubmission,
+        failed_rules: list[RuleResult],
+        risk_score: RiskScore | None,
+    ) -> EvidenceRetrievalResult:
+        return EvidenceRetrievalResult(
+            status=EvidenceRetrievalStatus.UNAVAILABLE,
+            failure_reason="Connection refused: knowledge agent is unavailable.",
+        )
+
+
+def test_rag_unavailability_does_not_change_referral_decision() -> None:
+    submission = InsuranceSubmission(
+        submission_id="SUB-UW-RAG-UNAVAILABLE-001",
+        applicant_name="Retail Services Inc.",
+        country="Canada",
+        industry="Retail",
+        annual_revenue_cad=8_000_000,
+        employee_count=45,
+        handles_personal_data=True,
+        handles_payment_card_data=True,
+        mfa_enabled=False,
+        endpoint_detection_response=False,
+        offline_backups=False,
+        prior_cyber_claims=0,
+        requested_limit_cad=1_000_000,
+        requested_retention_cad=25_000,
+    )
+
+    service = UnderwritingService(knowledge_agent=UnavailableInsuranceKnowledgeAgent())
+
+    decision = service.underwrite(submission)
+
+    assert decision.decision == DecisionType.REFER
+    assert decision.human_review_required is True
+    assert decision.evidence == []
+    assert decision.evidence_retrieval_status == EvidenceRetrievalStatus.UNAVAILABLE
+    assert decision.evidence_retrieval_failure_reason is not None

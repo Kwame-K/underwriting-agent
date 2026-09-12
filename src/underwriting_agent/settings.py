@@ -4,6 +4,8 @@ from pathlib import Path
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
+DATA_DIR = PROJECT_ROOT / "data"
+DEFAULT_DATABASE_PATH = DATA_DIR / "underwriting_agent.db"
 
 
 class Settings(BaseSettings):
@@ -15,6 +17,8 @@ class Settings(BaseSettings):
 
     knowledge_agent_base_url: str = "http://127.0.0.1:8001"
     knowledge_agent_timeout_seconds: float = 5.0
+
+    database_url: str = f"sqlite:///{DEFAULT_DATABASE_PATH}"
 
 
 @lru_cache

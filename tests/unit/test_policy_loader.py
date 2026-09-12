@@ -6,7 +6,7 @@ def test_default_underwriting_policy_is_loaded() -> None:
     policy = load_underwriting_policy()
 
     assert policy.policy_name == "Cyber SME Underwriting Policy"
-    assert policy.policy_version == "0.4.0"
+    assert policy.policy_version == "0.5.0"
     assert policy.product_line == ProductLine.CYBER_SME
     assert policy.supported_countries == ("Canada",)
     assert "gambling" in policy.excluded_industries
@@ -31,3 +31,13 @@ def test_default_policy_contains_condition_templates() -> None:
 
     assert policy.conditions.mfa_not_enabled.condition_id == "COND-001"
     assert policy.conditions.enhanced_security_review.category == "SECURITY_REVIEW"
+
+
+def test_default_policy_has_documented_security_thresholds() -> None:
+    policy = load_underwriting_policy()
+
+    assert policy.security_controls.mfa_requirement_revenue_threshold_cad == 5_000_000
+    assert (
+        policy.security_controls.backup_requirement_revenue_threshold_cad == 5_000_000
+    )
+    assert policy.security_controls.edr_requirement_revenue_threshold_cad == 10_000_000

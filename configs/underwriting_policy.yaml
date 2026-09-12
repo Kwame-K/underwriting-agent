@@ -1,5 +1,5 @@
 policy_name: Cyber SME Underwriting Policy
-policy_version: 0.4.0
+policy_version: 0.5.0
 product_line: CYBER_SME
 
 supported_countries:
@@ -19,6 +19,9 @@ authority:
 
 security_controls:
   mfa_required_for_automated_underwriting: true
+  mfa_requirement_revenue_threshold_cad: 5000000
+  backup_requirement_revenue_threshold_cad: 5000000
+  edr_requirement_revenue_threshold_cad: 10000000
 
 pricing:
   pricing_model_version: 0.1.0
@@ -46,12 +49,14 @@ conditions:
   edr_not_confirmed:
     condition_id: COND-002
     category: REQUIRED_CONTROL
-    message: Provide evidence that endpoint detection and response is deployed and actively monitored.
+    message: Provide evidence that endpoint detection and response or equivalent endpoint protection is deployed.
+
 
   offline_backups_not_confirmed:
     condition_id: COND-003
     category: REQUIRED_CONTROL
-    message: Provide evidence of tested offline or immutable backups.
+    message: Provide evidence that critical-system and data backups are maintained and tested at least annually.
+
 
   payment_card_data:
     condition_id: COND-004

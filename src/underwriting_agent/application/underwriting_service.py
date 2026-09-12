@@ -36,9 +36,11 @@ class UnderwritingService:
         self.conditions_recommender = (
             conditions_recommender
             or UnderwritingConditionsRecommender(
-                conditions_policy=self.rules_engine.policy.conditions
+                conditions_policy=self.rules_engine.policy.conditions,
+                security_controls_policy=self.rules_engine.policy.security_controls,
             )
         )
+
         self.knowledge_agent = knowledge_agent or NoOpInsuranceKnowledgeAgent()
 
     def underwrite(self, submission: InsuranceSubmission) -> UnderwritingDecision:
@@ -64,7 +66,7 @@ class UnderwritingService:
             severity=RuleSeverity.DECLINE,
         )
         if decline_results:
-            evidence = self.knowledge_agent.retrieve_evidence(
+            evidence_result = self.knowledge_agent.retrieve_evidence(
                 submission=submission,
                 failed_rules=failed_rules,
                 risk_score=None,
@@ -77,11 +79,16 @@ class UnderwritingService:
                 reasons=[rule.message for rule in decline_results],
                 rule_results=rule_results,
                 policy_version=self._policy_version(),
-                evidence=evidence,
+                evidence=evidence_result.citations,
+                evidence_retrieval_status=evidence_result.status,
+                unresolved_evidence_finding_ids=(
+                    evidence_result.unresolved_finding_ids
+                ),
+                evidence_retrieval_failure_reason=(evidence_result.failure_reason),
             )
 
         risk_score = self.risk_scoring_service.score(submission)
-        evidence = self.knowledge_agent.retrieve_evidence(
+        evidence_result = self.knowledge_agent.retrieve_evidence(
             submission=submission,
             failed_rules=failed_rules,
             risk_score=risk_score,
@@ -120,7 +127,12 @@ class UnderwritingService:
                 pricing_factors=pricing_indication.factors,
                 pricing_model_version=pricing_indication.pricing_model_version,
                 conditions=conditions,
-                evidence=evidence,
+                evidence=evidence_result.citations,
+                evidence_retrieval_status=evidence_result.status,
+                unresolved_evidence_finding_ids=(
+                    evidence_result.unresolved_finding_ids
+                ),
+                evidence_retrieval_failure_reason=(evidence_result.failure_reason),
             )
 
         return UnderwritingDecision(
@@ -142,7 +154,10 @@ class UnderwritingService:
             pricing_factors=pricing_indication.factors,
             pricing_model_version=pricing_indication.pricing_model_version,
             conditions=conditions,
-            evidence=evidence,
+            evidence=evidence_result.citations,
+            evidence_retrieval_status=evidence_result.status,
+            unresolved_evidence_finding_ids=(evidence_result.unresolved_finding_ids),
+            evidence_retrieval_failure_reason=(evidence_result.failure_reason),
         )
 
     def _policy_version(self) -> str:

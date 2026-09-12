@@ -40,7 +40,10 @@ def build_risk_score(risk_band: RiskBand) -> RiskScore:
 
 def test_low_risk_submission_requires_no_conditions() -> None:
     policy = load_underwriting_policy()
-    recommender = UnderwritingConditionsRecommender(policy.conditions)
+    recommender = UnderwritingConditionsRecommender(
+        conditions_policy=policy.conditions,
+        security_controls_policy=policy.security_controls,
+    )
 
     conditions = recommender.recommend(
         submission=build_submission(),
@@ -52,7 +55,10 @@ def test_low_risk_submission_requires_no_conditions() -> None:
 
 def test_missing_mfa_generates_mfa_condition() -> None:
     policy = load_underwriting_policy()
-    recommender = UnderwritingConditionsRecommender(policy.conditions)
+    recommender = UnderwritingConditionsRecommender(
+        conditions_policy=policy.conditions,
+        security_controls_policy=policy.security_controls,
+    )
 
     conditions = recommender.recommend(
         submission=build_submission(mfa_enabled=False),
@@ -67,7 +73,10 @@ def test_missing_mfa_generates_mfa_condition() -> None:
 
 def test_high_risk_submission_generates_expected_conditions() -> None:
     policy = load_underwriting_policy()
-    recommender = UnderwritingConditionsRecommender(policy.conditions)
+    recommender = UnderwritingConditionsRecommender(
+        conditions_policy=policy.conditions,
+        security_controls_policy=policy.security_controls,
+    )
 
     conditions = recommender.recommend(
         submission=build_submission(
@@ -85,7 +94,6 @@ def test_high_risk_submission_generates_expected_conditions() -> None:
 
     assert condition_ids == {
         "COND-001",
-        "COND-002",
         "COND-003",
         "COND-004",
         "COND-005",
@@ -96,7 +104,11 @@ def test_high_risk_submission_generates_expected_conditions() -> None:
 
 def test_duplicate_conditions_are_removed() -> None:
     policy = load_underwriting_policy()
-    recommender = UnderwritingConditionsRecommender(policy.conditions)
+
+    recommender = UnderwritingConditionsRecommender(
+        conditions_policy=policy.conditions,
+        security_controls_policy=policy.security_controls,
+    )
 
     conditions = recommender.recommend(
         submission=build_submission(
@@ -110,3 +122,47 @@ def test_duplicate_conditions_are_removed() -> None:
     condition_ids = [condition.condition_id for condition in conditions]
 
     assert len(condition_ids) == len(set(condition_ids))
+
+    condition_ids = [condition.condition_id for condition in conditions]
+
+    assert len(condition_ids) == len(set(condition_ids))
+
+
+def test_edr_condition_is_not_required_at_ten_million_revenue() -> None:
+    policy = load_underwriting_policy()
+    recommender = UnderwritingConditionsRecommender(
+        conditions_policy=policy.conditions,
+        security_controls_policy=policy.security_controls,
+    )
+
+    conditions = recommender.recommend(
+        submission=build_submission(
+            annual_revenue_cad=10_000_000,
+            endpoint_detection_response=False,
+        ),
+        risk_score=build_risk_score(RiskBand.MEDIUM),
+    )
+
+    condition_ids = {condition.condition_id for condition in conditions}
+
+    assert "COND-002" not in condition_ids
+
+
+def test_edr_condition_is_required_above_ten_million_revenue() -> None:
+    policy = load_underwriting_policy()
+    recommender = UnderwritingConditionsRecommender(
+        conditions_policy=policy.conditions,
+        security_controls_policy=policy.security_controls,
+    )
+
+    conditions = recommender.recommend(
+        submission=build_submission(
+            annual_revenue_cad=10_000_001,
+            endpoint_detection_response=False,
+        ),
+        risk_score=build_risk_score(RiskBand.HIGH),
+    )
+
+    condition_ids = {condition.condition_id for condition in conditions}
+
+    assert "COND-002" in condition_ids

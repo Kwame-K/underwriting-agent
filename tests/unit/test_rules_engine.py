@@ -70,3 +70,45 @@ def test_limit_above_authority_fails_referral_rule() -> None:
     assert limit_rule.rule_id == "UW-CYB-004"
     assert limit_rule.passed is False
     assert limit_rule.severity == RuleSeverity.REFERRAL
+
+
+def test_mfa_is_not_a_documented_requirement_at_five_million_revenue() -> None:
+    results = UnderwritingRulesEngine().evaluate(
+        build_submission(
+            annual_revenue_cad=5_000_000,
+            mfa_enabled=False,
+        )
+    )
+
+    mfa_rule = results[2]
+
+    assert mfa_rule.rule_id == "UW-CYB-003"
+    assert mfa_rule.passed is True
+
+
+def test_mfa_is_required_above_five_million_revenue() -> None:
+    results = UnderwritingRulesEngine().evaluate(
+        build_submission(
+            annual_revenue_cad=5_000_001,
+            mfa_enabled=False,
+        )
+    )
+
+    mfa_rule = results[2]
+
+    assert mfa_rule.rule_id == "UW-CYB-003"
+    assert mfa_rule.passed is False
+    assert mfa_rule.severity == RuleSeverity.REFERRAL
+
+
+def test_mfa_enabled_above_five_million_revenue_passes_requirement() -> None:
+    results = UnderwritingRulesEngine().evaluate(
+        build_submission(
+            annual_revenue_cad=8_000_000,
+            mfa_enabled=True,
+        )
+    )
+
+    mfa_rule = results[2]
+
+    assert mfa_rule.passed is True

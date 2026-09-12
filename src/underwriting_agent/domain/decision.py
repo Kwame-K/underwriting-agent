@@ -1,16 +1,24 @@
 from datetime import UTC, datetime
+from uuid import uuid4
 
 from pydantic import BaseModel, Field
 
 from underwriting_agent.domain.condition import UnderwritingCondition
 from underwriting_agent.domain.enums import DecisionType, RiskBand
-from underwriting_agent.domain.evidence import EvidenceCitation
+from underwriting_agent.domain.evidence import (
+    EvidenceCitation,
+    EvidenceRetrievalStatus,
+)
 from underwriting_agent.domain.pricing import PricingFactor
 from underwriting_agent.domain.risk_score import RiskFactor
 from underwriting_agent.domain.rules import RuleResult
 
 
 class UnderwritingDecision(BaseModel):
+    decision_id: str = Field(
+        default_factory=lambda: f"DEC-{uuid4()}",
+    )
+
     submission_id: str
     decision: DecisionType
     human_review_required: bool
@@ -31,6 +39,11 @@ class UnderwritingDecision(BaseModel):
     conditions: list[UnderwritingCondition] = Field(default_factory=list)
     rule_results: list[RuleResult] = Field(default_factory=list)
     evidence: list[EvidenceCitation] = Field(default_factory=list)
+    evidence_retrieval_status: EvidenceRetrievalStatus = (
+        EvidenceRetrievalStatus.NOT_REQUESTED
+    )
+    unresolved_evidence_finding_ids: list[str] = Field(default_factory=list)
+    evidence_retrieval_failure_reason: str | None = None
 
     policy_version: str
     created_at: datetime = Field(

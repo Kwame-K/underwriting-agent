@@ -59,22 +59,44 @@ class UnderwritingRulesEngine:
         )
 
     def _evaluate_mfa(self, submission: InsuranceSubmission) -> RuleResult:
+        annual_revenue_cad = submission.annual_revenue_cad or 0
+
         mfa_required = (
             self.policy.security_controls.mfa_required_for_automated_underwriting
+            and annual_revenue_cad
+            > self.policy.security_controls.mfa_requirement_revenue_threshold_cad
         )
+
         mfa_enabled = submission.mfa_enabled is True
         passed = not mfa_required or mfa_enabled
+
+        threshold_cad = (
+            self.policy.security_controls.mfa_requirement_revenue_threshold_cad
+        )
+
+        if not mfa_required:
+            message = (
+                "Multi-factor authentication is not a documented mandatory control "
+                f"at or below the revenue threshold of {threshold_cad:,.0f} CAD."
+            )
+        elif mfa_enabled:
+            message = (
+                "Multi-factor authentication is enabled for a submission above the "
+                "documented revenue threshold."
+            )
+        else:
+            message = (
+                "Multi-factor authentication is not enabled for a submission above "
+                f"the documented revenue threshold of {threshold_cad:,.0f} CAD and "
+                "requires human review."
+            )
 
         return RuleResult(
             rule_id="UW-CYB-003",
             rule_name="Multi-factor authentication requirement",
             passed=passed,
             severity=RuleSeverity.REFERRAL,
-            message=(
-                "Multi-factor authentication is enabled."
-                if passed
-                else "Multi-factor authentication is not enabled and requires human review."
-            ),
+            message=message,
         )
 
     def _evaluate_requested_limit(

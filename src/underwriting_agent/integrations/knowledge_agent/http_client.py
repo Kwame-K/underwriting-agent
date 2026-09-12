@@ -1,20 +1,38 @@
 import logging
 from collections.abc import Mapping
 from types import MappingProxyType
-from typing import ClassVar
+from typing import ClassVar, Literal
 
 import httpx2
+from pydantic import BaseModel, ValidationError
 
-from underwriting_agent.domain.evidence import EvidenceCitation
+from underwriting_agent.domain.evidence import (
+    EvidenceCitation,
+    EvidenceRetrievalResult,
+    EvidenceRetrievalStatus,
+)
 from underwriting_agent.domain.risk_score import RiskScore
 from underwriting_agent.domain.rules import RuleResult
 from underwriting_agent.domain.submission import InsuranceSubmission
+from underwriting_agent.integrations.knowledge_agent.port import (
+    InsuranceKnowledgeAgentPort,
+)
 from underwriting_agent.settings import Settings, get_settings
 
 logger = logging.getLogger(__name__)
 
 
-class HTTPInsuranceKnowledgeAgent:
+class KnowledgeAgentEvidenceResponse(BaseModel):
+    retrieval_status: Literal[
+        "SUCCESS",
+        "PARTIAL",
+        "INSUFFICIENT_CONTEXT",
+    ]
+    citations: list[EvidenceCitation]
+    unresolved_finding_ids: list[str]
+
+
+class HTTPInsuranceKnowledgeAgent(InsuranceKnowledgeAgentPort):
     """HTTP adapter for the Insurance Knowledge Agent API."""
 
     rule_queries: ClassVar[Mapping[str, str]] = MappingProxyType(
@@ -49,9 +67,11 @@ class HTTPInsuranceKnowledgeAgent:
         submission: InsuranceSubmission,
         failed_rules: list[RuleResult],
         risk_score: RiskScore | None,
-    ) -> list[EvidenceCitation]:
+    ) -> EvidenceRetrievalResult:
         if not failed_rules:
-            return []
+            return EvidenceRetrievalResult(
+                status=EvidenceRetrievalStatus.NOT_REQUESTED,
+            )
 
         payload = self._build_payload(
             submission=submission,
@@ -69,30 +89,28 @@ class HTTPInsuranceKnowledgeAgent:
                 )
                 response.raise_for_status()
 
-        except httpx2.HTTPError as error:
+            response_data: object = response.json()
+            knowledge_response = KnowledgeAgentEvidenceResponse.model_validate(
+                response_data
+            )
+
+        except (httpx2.HTTPError, ValidationError, ValueError) as error:
             logger.warning(
                 "Knowledge Agent retrieval failed for submission %s: %s",
                 submission.submission_id,
                 error,
             )
-            return []
 
-        response_data: dict[str, object] = response.json()
-
-        raw_citations = response_data.get("citations", [])
-
-        if not isinstance(raw_citations, list):
-            logger.warning(
-                "Knowledge Agent returned an invalid citations payload for %s.",
-                submission.submission_id,
+            return EvidenceRetrievalResult(
+                status=EvidenceRetrievalStatus.UNAVAILABLE,
+                failure_reason=str(error),
             )
-            return []
 
-        return [
-            EvidenceCitation.model_validate(citation)
-            for citation in raw_citations
-            if isinstance(citation, dict)
-        ]
+        return EvidenceRetrievalResult(
+            status=EvidenceRetrievalStatus(knowledge_response.retrieval_status),
+            citations=knowledge_response.citations,
+            unresolved_finding_ids=knowledge_response.unresolved_finding_ids,
+        )
 
     def _build_payload(
         self,

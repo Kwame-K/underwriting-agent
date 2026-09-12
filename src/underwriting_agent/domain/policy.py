@@ -17,6 +17,10 @@ class SecurityControlsPolicy(BaseModel):
 
     mfa_required_for_automated_underwriting: bool
 
+    mfa_requirement_revenue_threshold_cad: float = Field(ge=0)
+    backup_requirement_revenue_threshold_cad: float = Field(ge=0)
+    edr_requirement_revenue_threshold_cad: float = Field(ge=0)
+
 
 class PricingPolicy(BaseModel):
     model_config = ConfigDict(frozen=True)
