@@ -1,10 +1,17 @@
 from typing import Annotated
+from uuid import uuid4
 
-from fastapi import Depends, FastAPI, HTTPException, Query, status
+from fastapi import Depends, FastAPI, Header, HTTPException, Query, Response, status
 
 from underwriting_agent.api.dependencies import (
     get_decision_repository,
+    get_submission_extractor,
     get_underwriting_service,
+)
+from underwriting_agent.api.extraction_models import (
+    ExtractAndUnderwriteRequest,
+    ExtractAndUnderwriteResponse,
+    WorkflowStatus,
 )
 from underwriting_agent.application.underwriting_service import (
     UnderwritingService,
@@ -19,6 +26,16 @@ from underwriting_agent.domain.review import (
 from underwriting_agent.domain.submission import InsuranceSubmission
 from underwriting_agent.infrastructure.repositories.decision_repository import (
     UnderwritingDecisionRepository,
+)
+from underwriting_agent.integrations.submission_extractor.http_client import (
+    SubmissionExtractorUnavailableError,
+)
+from underwriting_agent.integrations.submission_extractor.models import (
+    ExtractionStatus,
+    SubmissionExtractionRequest,
+)
+from underwriting_agent.integrations.submission_extractor.port import (
+    SubmissionExtractorPort,
 )
 
 app = FastAPI(
@@ -40,6 +57,11 @@ UnderwritingDecisionRepositoryDependency = Annotated[
 ReviewStatusQuery = Annotated[
     DecisionReviewStatus,
     Query(alias="status"),
+]
+
+SubmissionExtractorDependency = Annotated[
+    SubmissionExtractorPort,
+    Depends(get_submission_extractor),
 ]
 
 
@@ -145,3 +167,72 @@ def get_decision_audit_trail(
         )
 
     return repository.list_audit_events(decision_id)
+
+
+@app.post(
+    "/extract-and-underwrite",
+    response_model=ExtractAndUnderwriteResponse,
+    summary="Extract a text submission before underwriting",
+)
+def extract_and_underwrite(
+    payload: ExtractAndUnderwriteRequest,
+    extractor: SubmissionExtractorDependency,
+    response: Response,
+    x_correlation_id: Annotated[
+        str | None,
+        Header(alias="X-Correlation-ID"),
+    ] = None,
+) -> ExtractAndUnderwriteResponse:
+    correlation_id = x_correlation_id or str(uuid4())
+    response.headers["X-Correlation-ID"] = correlation_id
+
+    try:
+        extraction = extractor.extract(
+            request=SubmissionExtractionRequest(
+                source_id=payload.source_id,
+                source_type=payload.source_type,
+                document_name=payload.document_name,
+                content=payload.content,
+                language=payload.language,
+            ),
+            correlation_id=correlation_id,
+        )
+    except SubmissionExtractorUnavailableError as error:
+        return ExtractAndUnderwriteResponse(
+            source_id=payload.source_id,
+            correlation_id=correlation_id,
+            workflow_status=WorkflowStatus.EXTRACTION_UNAVAILABLE,
+            message=str(error),
+        )
+
+    needs_review = (
+        extraction.extraction_status is not ExtractionStatus.COMPLETE
+        or extraction.review_required
+    )
+
+    if needs_review:
+        return ExtractAndUnderwriteResponse(
+            source_id=payload.source_id,
+            correlation_id=correlation_id,
+            workflow_status=WorkflowStatus.PENDING_INFORMATION,
+            extraction_status=extraction.extraction_status.value,
+            review_required=extraction.review_required,
+            missing_fields=extraction.missing_fields,
+            ambiguous_fields=extraction.ambiguous_fields,
+            data_quality_flags=extraction.data_quality_flags,
+            message=(
+                "Extraction requires additional information or human review "
+                "before underwriting."
+            ),
+        )
+
+    return ExtractAndUnderwriteResponse(
+        source_id=payload.source_id,
+        correlation_id=correlation_id,
+        workflow_status=WorkflowStatus.UNSUPPORTED_SUBMISSION,
+        extraction_status=extraction.extraction_status.value,
+        message=(
+            "Extraction completed, but automatic mapping to the Project 4 "
+            "cyber underwriting model is not implemented yet."
+        ),
+    )

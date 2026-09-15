@@ -16,7 +16,10 @@ class Settings(BaseSettings):
     )
 
     knowledge_agent_base_url: str = "http://127.0.0.1:8001"
-    knowledge_agent_timeout_seconds: float = 5.0
+    knowledge_agent_timeout_seconds: float = 10.0
+
+    submission_extractor_base_url: str = "http://127.0.0.1:8000"
+    submission_extractor_timeout_seconds: float = 30.0
 
     database_url: str = f"sqlite:///{DEFAULT_DATABASE_PATH}"
 

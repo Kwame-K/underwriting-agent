@@ -1,0 +1,23 @@
+services:
+  underwriting-agent:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: underwriting-agent:local
+    container_name: underwriting-agent
+    environment:
+      DATABASE_URL: sqlite:////app/data/underwriting_agent.db
+      SUBMISSION_EXTRACTOR_BASE_URL: ${SUBMISSION_EXTRACTOR_BASE_URL:-http://host.docker.internal:8000}
+      SUBMISSION_EXTRACTOR_TIMEOUT_SECONDS: ${SUBMISSION_EXTRACTOR_TIMEOUT_SECONDS:-30}
+      KNOWLEDGE_AGENT_BASE_URL: ${KNOWLEDGE_AGENT_BASE_URL:-http://host.docker.internal:8001}
+      KNOWLEDGE_AGENT_TIMEOUT_SECONDS: ${KNOWLEDGE_AGENT_TIMEOUT_SECONDS:-10}
+    ports:
+      - "8002:8002"
+    volumes:
+      - underwriting_agent_data:/app/data
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    restart: unless-stopped
+
+volumes:
+  underwriting_agent_data:
