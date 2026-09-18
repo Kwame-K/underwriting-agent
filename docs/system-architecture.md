@@ -49,7 +49,7 @@ flowchart TD
     S --> T[UnderwritingDecisionRepository]
     T --> U[SQLAlchemy: submissions, decisions, audit_events]
     S -- human_review_required=true --> V[PENDING_REVIEW]
-    V --> W[POST /decisions/{id}/review]
+    V --> W["POST /decisions/{id}/review"]
     W --> T
 ```
 
