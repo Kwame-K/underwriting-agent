@@ -1,5 +1,7 @@
 # Underwriting Agent
 
+[![Continuous Integration](../../actions/workflows/ci.yml/badge.svg)](../../actions/workflows/ci.yml)
+
 An explainable cyber-insurance underwriting workflow for Canadian small and medium-sized enterprises. The service validates a submission, checks underwriting appetite, calculates a deterministic cyber-risk score, produces a synthetic pricing indication, recommends underwriting conditions, retrieves documentary evidence from the Insurance Knowledge Agent, and persists every decision with a full audit trail and human-review workflow.
 
 This repository is **Project 4** in a five-project insurance agentic AI portfolio. It combines deterministic underwriting controls with two external services (a submission extractor and a RAG knowledge agent) while keeping material underwriting decisions auditable and under explicit rule control.
