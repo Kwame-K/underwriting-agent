@@ -52,7 +52,10 @@ SessionFactory = create_session_factory(engine)
 
 
 def initialize_database() -> None:
-    if make_url(normalize_database_url(settings.database_url)).get_backend_name() == "sqlite":
+    if (
+        make_url(normalize_database_url(settings.database_url)).get_backend_name()
+        == "sqlite"
+    ):
         from underwriting_agent.infrastructure.persistence.models import Base
 
         Base.metadata.create_all(bind=engine)
