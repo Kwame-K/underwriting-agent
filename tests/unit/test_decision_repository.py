@@ -1,5 +1,5 @@
 import pytest
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, event
 
 from underwriting_agent.domain.audit import AuditEventType
 from underwriting_agent.domain.decision import UnderwritingDecision
@@ -28,6 +28,12 @@ def create_repository(
         f"sqlite:///{database_path}",
         connect_args={"check_same_thread": False},
     )
+
+    @event.listens_for(engine, "connect")
+    def enable_sqlite_foreign_keys(dbapi_connection, _) -> None:
+        cursor = dbapi_connection.cursor()
+        cursor.execute("PRAGMA foreign_keys=ON")
+        cursor.close()
 
     Base.metadata.create_all(bind=engine)
 

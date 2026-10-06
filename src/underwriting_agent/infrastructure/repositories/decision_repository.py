@@ -59,6 +59,8 @@ class UnderwritingDecisionRepository:
                 )
                 submission_record.updated_at = now
 
+            session.flush()
+
             decision_record = UnderwritingDecisionRecord(
                 decision_id=decision.decision_id,
                 submission_id=submission.submission_id,
@@ -75,6 +77,7 @@ class UnderwritingDecisionRepository:
                 created_at=decision.created_at,
             )
             session.add(decision_record)
+            session.flush()
 
             submission_event = AuditEvent(
                 decision_id=decision.decision_id,
