@@ -1,3 +1,5 @@
+from collections.abc import Callable, Iterator
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -79,7 +81,7 @@ class UnavailableExtractor:
 
 
 @pytest.fixture
-def client_with_extractor():
+def client_with_extractor() -> Iterator[Callable[[object], TestClient]]:
     def build_client(extractor: object) -> TestClient:
         app.dependency_overrides[get_submission_extractor] = lambda: extractor
 
@@ -91,7 +93,7 @@ def client_with_extractor():
 
 
 def test_extract_and_underwrite_routes_partial_extraction_to_review(
-    client_with_extractor: object,
+    client_with_extractor: Callable[[object], TestClient],
 ) -> None:
     client = client_with_extractor(PartialExtractor())
 
@@ -116,7 +118,7 @@ def test_extract_and_underwrite_routes_partial_extraction_to_review(
 
 
 def test_extract_and_underwrite_does_not_underwrite_unmapped_complete_extraction(
-    client_with_extractor: object,
+    client_with_extractor: Callable[[object], TestClient],
 ) -> None:
     client = client_with_extractor(CompleteExtractor())
 
@@ -138,7 +140,7 @@ def test_extract_and_underwrite_does_not_underwrite_unmapped_complete_extraction
 
 
 def test_extract_and_underwrite_returns_controlled_status_when_extractor_unavailable(
-    client_with_extractor: object,
+    client_with_extractor: Callable[[object], TestClient],
 ) -> None:
     client = client_with_extractor(UnavailableExtractor())
 

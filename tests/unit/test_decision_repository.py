@@ -7,6 +7,7 @@ from underwriting_agent.domain.enums import DecisionType
 from underwriting_agent.domain.review import (
     DecisionReviewStatus,
     ReviewDecisionCommand,
+    UnderwriterModifications,
     UnderwriterReviewAction,
 )
 from underwriting_agent.domain.submission import InsuranceSubmission
@@ -127,11 +128,11 @@ def test_repository_persists_referred_decision_and_review_request(
         ),
         (
             UnderwriterReviewAction.MODIFY,
-            {
-                "approved_limit_cad": 750_000,
-                "annual_premium_cad": 18_500,
-                "added_conditions": ["MFA must be enabled before policy inception."],
-            },
+            UnderwriterModifications(
+                approved_limit_cad=750_000,
+                annual_premium_cad=18_500,
+                added_conditions=["MFA must be enabled before policy inception."],
+            ),
             DecisionReviewStatus.UNDERWRITER_MODIFIED,
             AuditEventType.UNDERWRITER_MODIFIED,
         ),
@@ -152,7 +153,7 @@ def test_repository_persists_referred_decision_and_review_request(
 def test_repository_records_each_review_transition(
     tmp_path,
     action: UnderwriterReviewAction,
-    modifications: dict[str, object] | None,
+    modifications: UnderwriterModifications | None,
     expected_status: DecisionReviewStatus,
     expected_event_type: AuditEventType,
 ) -> None:
