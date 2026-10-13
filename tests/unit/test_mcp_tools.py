@@ -98,59 +98,58 @@ _CYBER_DATA: dict[str, object] = {
     "claims_history_status": "no_losses_reported",
 }
 
+_CONTROL_OVERRIDES: dict[str, object] = {
+    "mfa_enabled": True,
+    "requested_limit_cad": 1_000_000,
+    "requested_retention_cad": 25_000,
+}
 
-def test_extract_and_evaluate_needs_information_without_overrides(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setattr(
-        tools, "get_submission_extractor", lambda: _FakeExtractor(_CYBER_DATA)
-    )
+
+def _install(monkeypatch: pytest.MonkeyPatch, data: dict[str, object]) -> None:
+    monkeypatch.setattr(tools, "get_submission_extractor", lambda: _FakeExtractor(data))
     monkeypatch.setattr(
         tools, "get_underwriting_service", lambda: UnderwritingService()
     )
+
+
+def test_extract_and_evaluate_is_pending_without_overrides(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _install(monkeypatch, {**_CYBER_DATA, "claims_history_status": "not_provided"})
 
     result = tools.extract_and_evaluate(_extraction_request())
 
-    assert result["workflow_status"] == "EVALUATED"
+    assert result["workflow_status"] == "PENDING_INFORMATION"
     assert result["decision"]["decision"] == "NEED_MORE_INFORMATION"
-    assert "mfa_enabled" in result["mapping"]["missing_fields"]
+    assert "mfa_enabled" in result["missing_fields"]
+    assert result["persisted"] is False
 
 
-def test_extract_and_evaluate_with_overrides_reaches_a_decision(
+def test_extract_and_evaluate_with_overrides_is_evaluated(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(
-        tools, "get_submission_extractor", lambda: _FakeExtractor(_CYBER_DATA)
-    )
-    monkeypatch.setattr(
-        tools, "get_underwriting_service", lambda: UnderwritingService()
-    )
+    _install(monkeypatch, _CYBER_DATA)
 
     result = tools.extract_and_evaluate(
-        _extraction_request(),
-        overrides={
-            "mfa_enabled": True,
-            "requested_limit_cad": 1_000_000,
-            "requested_retention_cad": 25_000,
-        },
+        _extraction_request(), overrides=_CONTROL_OVERRIDES
     )
 
     assert result["workflow_status"] == "EVALUATED"
     assert result["decision"]["decision"] != "NEED_MORE_INFORMATION"
-    assert result["mapping"]["overridden_fields"] == [
+    assert result["overridden_fields"] == [
         "mfa_enabled",
         "requested_limit_cad",
         "requested_retention_cad",
     ]
+    assert result["persisted"] is False
 
 
 def test_extract_and_evaluate_skips_non_cyber_submission(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    data = {**_CYBER_DATA, "product_line": "commercial_property"}
-    monkeypatch.setattr(tools, "get_submission_extractor", lambda: _FakeExtractor(data))
+    _install(monkeypatch, {**_CYBER_DATA, "product_line": "commercial_property"})
 
     result = tools.extract_and_evaluate(_extraction_request())
 
-    assert result["workflow_status"] == "NOT_APPLICABLE"
-    assert "decision" not in result
+    assert result["workflow_status"] == "UNSUPPORTED_SUBMISSION"
+    assert result["decision"] is None

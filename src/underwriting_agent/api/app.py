@@ -11,11 +11,9 @@ from underwriting_agent.api.dependencies import (
 from underwriting_agent.api.extraction_models import (
     ExtractAndUnderwriteRequest,
     ExtractAndUnderwriteResponse,
-    WorkflowStatus,
 )
-from underwriting_agent.application.submission_mapper import (
-    MappingStatus,
-    SubmissionMapper,
+from underwriting_agent.application.extract_and_evaluate_service import (
+    ExtractAndEvaluateService,
 )
 from underwriting_agent.application.underwriting_service import (
     UnderwritingService,
@@ -31,11 +29,7 @@ from underwriting_agent.domain.submission import InsuranceSubmission
 from underwriting_agent.infrastructure.repositories.decision_repository import (
     UnderwritingDecisionRepository,
 )
-from underwriting_agent.integrations.submission_extractor.http_client import (
-    SubmissionExtractorUnavailableError,
-)
 from underwriting_agent.integrations.submission_extractor.models import (
-    ExtractionStatus,
     SubmissionExtractionRequest,
 )
 from underwriting_agent.integrations.submission_extractor.port import (
@@ -176,7 +170,7 @@ def get_decision_audit_trail(
 @app.post(
     "/extract-and-underwrite",
     response_model=ExtractAndUnderwriteResponse,
-    summary="Extract a text submission before underwriting",
+    summary="Extract a text submission, map it, and evaluate it",
 )
 def extract_and_underwrite(
     payload: ExtractAndUnderwriteRequest,
@@ -189,81 +183,21 @@ def extract_and_underwrite(
     correlation_id = x_correlation_id or str(uuid4())
     response.headers["X-Correlation-ID"] = correlation_id
 
-    try:
-        extraction = extractor.extract(
-            request=SubmissionExtractionRequest(
-                source_id=payload.source_id,
-                source_type=payload.source_type,
-                document_name=payload.document_name,
-                content=payload.content,
-                language=payload.language,
-            ),
-            correlation_id=correlation_id,
-        )
-    except SubmissionExtractorUnavailableError as error:
-        return ExtractAndUnderwriteResponse(
-            source_id=payload.source_id,
-            correlation_id=correlation_id,
-            workflow_status=WorkflowStatus.EXTRACTION_UNAVAILABLE,
-            message=str(error),
-        )
-
-    needs_review = (
-        extraction.extraction_status is not ExtractionStatus.COMPLETE
-        or extraction.review_required
+    workflow = ExtractAndEvaluateService(
+        extractor=extractor,
+        underwriting_service=service,
+        recorder=repository,
     )
 
-    if needs_review:
-        return ExtractAndUnderwriteResponse(
+    return workflow.run(
+        request=SubmissionExtractionRequest(
             source_id=payload.source_id,
-            correlation_id=correlation_id,
-            workflow_status=WorkflowStatus.PENDING_INFORMATION,
-            extraction_status=extraction.extraction_status.value,
-            review_required=extraction.review_required,
-            missing_fields=extraction.missing_fields,
-            ambiguous_fields=extraction.ambiguous_fields,
-            data_quality_flags=extraction.data_quality_flags,
-            message=(
-                "Extraction requires additional information or human review "
-                "before underwriting."
-            ),
-        )
-
-    mapping = SubmissionMapper().map(extraction.submission_data)
-
-    if mapping.status is MappingStatus.NOT_APPLICABLE:
-        return ExtractAndUnderwriteResponse(
-            source_id=payload.source_id,
-            correlation_id=correlation_id,
-            workflow_status=WorkflowStatus.UNSUPPORTED_SUBMISSION,
-            extraction_status=extraction.extraction_status.value,
-            mapping_messages=mapping.messages,
-            message="The submission does not request cyber coverage.",
-        )
-
-    if mapping.status is MappingStatus.INVALID or mapping.submission is None:
-        return ExtractAndUnderwriteResponse(
-            source_id=payload.source_id,
-            correlation_id=correlation_id,
-            workflow_status=WorkflowStatus.PENDING_INFORMATION,
-            extraction_status=extraction.extraction_status.value,
-            mapping_messages=mapping.messages,
-            message="The extracted data could not be mapped to a valid submission.",
-        )
-
-    decision = service.underwrite(mapping.submission)
-    repository.save_submission_and_decision(
-        submission=mapping.submission,
-        decision=decision,
-    )
-
-    return ExtractAndUnderwriteResponse(
-        source_id=payload.source_id,
+            source_type=payload.source_type,
+            document_name=payload.document_name,
+            content=payload.content,
+            language=payload.language,
+        ),
         correlation_id=correlation_id,
-        workflow_status=WorkflowStatus.READY_FOR_UNDERWRITING,
-        extraction_status=extraction.extraction_status.value,
-        missing_fields=mapping.missing_fields,
-        inferred_fields=mapping.inferred_fields,
-        decision=decision,
-        message="Extraction mapped and underwritten.",
+        overrides=payload.overrides,
+        persist=payload.persist,
     )
