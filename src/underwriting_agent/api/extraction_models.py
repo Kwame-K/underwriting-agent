@@ -3,6 +3,7 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
+from underwriting_agent.domain.decision import UnderwritingDecision
 from underwriting_agent.integrations.submission_extractor.models import (
     SourceType,
 )
@@ -33,5 +34,9 @@ class ExtractAndUnderwriteResponse(BaseModel):
     missing_fields: list[str] = Field(default_factory=list)
     ambiguous_fields: list[str] = Field(default_factory=list)
     data_quality_flags: list[dict[str, Any]] = Field(default_factory=list)
+
+    inferred_fields: list[str] = Field(default_factory=list)
+    mapping_messages: list[str] = Field(default_factory=list)
+    decision: UnderwritingDecision | None = None
 
     message: str

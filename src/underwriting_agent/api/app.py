@@ -13,6 +13,10 @@ from underwriting_agent.api.extraction_models import (
     ExtractAndUnderwriteResponse,
     WorkflowStatus,
 )
+from underwriting_agent.application.submission_mapper import (
+    MappingStatus,
+    SubmissionMapper,
+)
 from underwriting_agent.application.underwriting_service import (
     UnderwritingService,
 )
@@ -177,11 +181,10 @@ def get_decision_audit_trail(
 def extract_and_underwrite(
     payload: ExtractAndUnderwriteRequest,
     extractor: SubmissionExtractorDependency,
+    service: UnderwritingServiceDependency,
+    repository: UnderwritingDecisionRepositoryDependency,
     response: Response,
-    x_correlation_id: Annotated[
-        str | None,
-        Header(alias="X-Correlation-ID"),
-    ] = None,
+    x_correlation_id: Annotated[str | None, Header(alias="X-Correlation-ID")] = None,
 ) -> ExtractAndUnderwriteResponse:
     correlation_id = x_correlation_id or str(uuid4())
     response.headers["X-Correlation-ID"] = correlation_id
@@ -226,13 +229,41 @@ def extract_and_underwrite(
             ),
         )
 
+    mapping = SubmissionMapper().map(extraction.submission_data)
+
+    if mapping.status is MappingStatus.NOT_APPLICABLE:
+        return ExtractAndUnderwriteResponse(
+            source_id=payload.source_id,
+            correlation_id=correlation_id,
+            workflow_status=WorkflowStatus.UNSUPPORTED_SUBMISSION,
+            extraction_status=extraction.extraction_status.value,
+            mapping_messages=mapping.messages,
+            message="The submission does not request cyber coverage.",
+        )
+
+    if mapping.status is MappingStatus.INVALID or mapping.submission is None:
+        return ExtractAndUnderwriteResponse(
+            source_id=payload.source_id,
+            correlation_id=correlation_id,
+            workflow_status=WorkflowStatus.PENDING_INFORMATION,
+            extraction_status=extraction.extraction_status.value,
+            mapping_messages=mapping.messages,
+            message="The extracted data could not be mapped to a valid submission.",
+        )
+
+    decision = service.underwrite(mapping.submission)
+    repository.save_submission_and_decision(
+        submission=mapping.submission,
+        decision=decision,
+    )
+
     return ExtractAndUnderwriteResponse(
         source_id=payload.source_id,
         correlation_id=correlation_id,
-        workflow_status=WorkflowStatus.UNSUPPORTED_SUBMISSION,
+        workflow_status=WorkflowStatus.READY_FOR_UNDERWRITING,
         extraction_status=extraction.extraction_status.value,
-        message=(
-            "Extraction completed, but automatic mapping to the Project 4 "
-            "cyber underwriting model is not implemented yet."
-        ),
+        missing_fields=mapping.missing_fields,
+        inferred_fields=mapping.inferred_fields,
+        decision=decision,
+        message="Extraction mapped and underwritten.",
     )

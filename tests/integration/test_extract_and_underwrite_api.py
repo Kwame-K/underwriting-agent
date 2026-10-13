@@ -24,6 +24,94 @@ def valid_payload() -> dict[str, str]:
     }
 
 
+class CompleteCyberExtractor:
+    def extract(
+        self,
+        request: object,
+        correlation_id: str,
+    ) -> SubmissionExtractionResponse:
+        return SubmissionExtractionResponse(
+            source_id="SRC-UW-001",
+            extraction_status=ExtractionStatus.COMPLETE,
+            submission_data={
+                "submission_id": "SRC-UW-001",
+                "product_line": "cyber",
+                "requested_coverages": ["cyber_liability"],
+                "insured_name": "Northwind Retail",
+                "business_activity": "software",
+                "location_province": "QC",
+                "annual_revenue_cad": 2_500_000,
+                "employee_count": 25,
+            },
+            review_required=False,
+        )
+
+
+class NonCyberExtractor:
+    def extract(
+        self,
+        request: object,
+        correlation_id: str,
+    ) -> SubmissionExtractionResponse:
+        return SubmissionExtractionResponse(
+            source_id="SRC-UW-001",
+            extraction_status=ExtractionStatus.COMPLETE,
+            submission_data={
+                "submission_id": "SRC-UW-001",
+                "product_line": "property",
+                "requested_coverages": ["property_damage"],
+                "insured_name": "Northwind Retail",
+                "business_activity": "retail",
+                "location_province": "QC",
+            },
+            review_required=False,
+        )
+
+
+def test_extract_and_underwrite_maps_complete_cyber_extraction_and_underwrites(
+    client_with_extractor: Callable[[object], TestClient],
+) -> None:
+    client = client_with_extractor(CompleteCyberExtractor())
+
+    response = client.post(
+        "/extract-and-underwrite",
+        json=valid_payload(),
+        headers={"X-Correlation-ID": "workflow-2026-0002"},
+    )
+
+    assert response.status_code == 200
+
+    payload = response.json()
+
+    assert payload["workflow_status"] == "READY_FOR_UNDERWRITING"
+    assert payload["extraction_status"] == "COMPLETE"
+    assert payload["decision"] is not None
+    assert "country" in payload["inferred_fields"]
+    assert response.headers["X-Correlation-ID"] == "workflow-2026-0002"
+
+
+def test_extract_and_underwrite_does_not_underwrite_non_cyber_submission(
+    client_with_extractor: Callable[[object], TestClient],
+) -> None:
+    client = client_with_extractor(NonCyberExtractor())
+
+    response = client.post(
+        "/extract-and-underwrite",
+        json=valid_payload(),
+        headers={"X-Correlation-ID": "workflow-2026-0003"},
+    )
+
+    assert response.status_code == 200
+
+    payload = response.json()
+
+    assert payload["workflow_status"] == "UNSUPPORTED_SUBMISSION"
+    assert payload["extraction_status"] == "COMPLETE"
+    assert payload["decision"] is None
+    assert "cyber" in payload["message"].lower()
+    assert response.headers["X-Correlation-ID"] == "workflow-2026-0003"
+
+
 class PartialExtractor:
     def extract(
         self,
@@ -47,24 +135,6 @@ class PartialExtractor:
                 }
             ],
             review_required=True,
-        )
-
-
-class CompleteExtractor:
-    def extract(
-        self,
-        request: object,
-        correlation_id: str,
-    ) -> SubmissionExtractionResponse:
-        return SubmissionExtractionResponse(
-            source_id="SRC-UW-001",
-            extraction_status=ExtractionStatus.COMPLETE,
-            submission_data={
-                "submission_id": "SRC-UW-001",
-                "product_line": "cyber",
-                "business_activity": "software",
-            },
-            review_required=False,
         )
 
 
@@ -115,28 +185,6 @@ def test_extract_and_underwrite_routes_partial_extraction_to_review(
     assert payload["missing_fields"] == ["postal_code", "requested_coverages"]
     assert payload["data_quality_flags"][0]["code"] == "CLAIMS_HISTORY_NOT_PROVIDED"
     assert response.headers["X-Correlation-ID"] == "workflow-2026-0001"
-
-
-def test_extract_and_underwrite_does_not_underwrite_unmapped_complete_extraction(
-    client_with_extractor: Callable[[object], TestClient],
-) -> None:
-    client = client_with_extractor(CompleteExtractor())
-
-    response = client.post(
-        "/extract-and-underwrite",
-        json=valid_payload(),
-        headers={"X-Correlation-ID": "workflow-2026-0002"},
-    )
-
-    assert response.status_code == 200
-
-    payload = response.json()
-
-    assert payload["workflow_status"] == "UNSUPPORTED_SUBMISSION"
-    assert payload["extraction_status"] == "COMPLETE"
-    assert payload["review_required"] is False
-    assert "mapping" in payload["message"].lower()
-    assert response.headers["X-Correlation-ID"] == "workflow-2026-0002"
 
 
 def test_extract_and_underwrite_returns_controlled_status_when_extractor_unavailable(
