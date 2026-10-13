@@ -213,6 +213,9 @@ Do not commit `.env`. Commit `.env.example` only.
 
 The synthetic policy is located at `configs/underwriting_policy.yaml` and contains supported countries, excluded industries, automated underwriting authority thresholds, MFA requirements, scoring and pricing factors, condition templates, and a policy version.
 
+**Excluded industries.** An exact match with `excluded_industries` is declined (`UW-CYB-002`). Free-text activity matching an entry of `excluded_industry_aliases` (English and French terms, case- and accent-insensitive, whole words) is **referred** to an underwriter instead of declined. Aliases require review by the underwriting team before any production use.
+
+
 Example:
 
 ```yaml
@@ -341,8 +344,13 @@ curl "http://127.0.0.1:8000/decisions/SUB-HIGH-RISK-RAG-001/audit-trail"
 
 ### Extract and underwrite from raw text (Project 1 integration)
 
+Start the stack with `insurance-agentic-platform` (`docker compose up --build -d`);
+the Underwriting Agent is then served on `http://127.0.0.1:8002`. When running
+`uvicorn` locally, use `--port 8002` so it does not collide with the Submission
+Extractor on port 8000.
+
 ```bash
-curl -X POST "http://127.0.0.1:8000/extract-and-underwrite" \
+curl -X POST "http://127.0.0.1:8002/extract-and-underwrite" \
   -H "Content-Type: application/json" \
   -H "X-Correlation-ID: corr-0001" \
   -d '{
@@ -350,11 +358,27 @@ curl -X POST "http://127.0.0.1:8000/extract-and-underwrite" \
     "source_type": "EMAIL",
     "document_name": "broker-submission.eml",
     "content": "Applicant: Retail Services Inc. ... ",
-    "language": "en"
+    "language": "en",
+    "overrides": {
+      "mfa_enabled": true,
+      "requested_limit_cad": 1000000,
+      "requested_retention_cad": 25000
+    },
+    "persist": false
   }'
 ```
 
-If Project 1 extraction is incomplete or flagged for review, the workflow returns `PENDING_INFORMATION` with missing fields instead of proceeding to underwriting. If Project 1 is unreachable, it returns `EXTRACTION_UNAVAILABLE` rather than failing silently.
+`overrides` supplies values the extractor cannot provide (for example MFA,
+requested limit and retention, prior cyber claims). `persist` defaults to `false`;
+with `true`, only a complete evaluation is saved.
+
+| `workflow_status` | Meaning |
+|---|---|
+| `EVALUATED` | Extraction mapped and underwritten; the decision is in the response |
+| `PENDING_INFORMATION` | Extraction needs review, mapping failed, or critical fields are missing (`missing_fields`); nothing is persisted |
+| `UNSUPPORTED_SUBMISSION` | The submission does not request cyber coverage |
+| `EXTRACTION_UNAVAILABLE` | Project 1 is unreachable or returned an invalid response |
+
 
 ## Pricing Indication
 
@@ -445,9 +469,60 @@ uv run uvicorn underwriting_agent.api.app:app --reload --port 8000
 
 If the knowledge service is unavailable, times out, or returns no relevant citation, the underwriting decision remains deterministic, the risk score and pricing indication remain available, and documentary evidence can be empty. A RAG failure must never silently turn a decline into an acceptance, or bypass a referral rule.
 
+## MCP Server
+
+The workflow is also exposed as a [Model Context Protocol](https://modelcontextprotocol.io) server over stdio, so MCP clients and agents can call it as tools. It reuses the same services as the REST API.
+
+```bash
+uv run underwriting-mcp
+```
+
+The process waits silently for MCP messages on stdin (logs go to stderr); it does not listen on a network port. Inspect it interactively with:
+
+```bash
+npx @modelcontextprotocol/inspector uv run underwriting-mcp
+```
+
+| Tool | Purpose | Persists |
+|---|---|---|
+| `extract_submission` | Extract candidate data from broker text through Project 1 | No |
+| `extract_and_evaluate` | Extract, map to the cyber model, and evaluate; accepts `overrides` for fields the extractor cannot provide | No |
+| `check_completeness` | List critical and optional missing fields | No |
+| `evaluate_underwriting` | Evaluate a structured submission | No |
+| `submit_underwriting` | Evaluate and persist the decision | **Yes** |
+| `get_decision` | Retrieve one persisted decision | No |
+| `get_audit_trail` | Retrieve the audit events of a decision | No |
+| `list_pending_reviews` | List decisions waiting for human review | No |
+
+Client configuration (Claude Desktop, Cursor, or any stdio MCP client):
+
+```json
+{
+  "mcpServers": {
+    "underwriting-agent": {
+      "command": "uv",
+      "args": [
+        "--directory",
+        "/absolute/path/to/underwriting-agent",
+        "run",
+        "underwriting-mcp"
+      ]
+    }
+  }
+}
+```
+
+Notes:
+
+- The server reads the same settings as the API. By default it uses the local SQLite database; set `DATABASE_URL` to share the PostgreSQL database of the platform.
+- The extraction tools call the Submission Extractor at `SUBMISSION_EXTRACTOR_BASE_URL` (default `http://127.0.0.1:8000`, published by the platform).
+- `submit_underwriting` is the only tool that writes; grant it to an agent deliberately.
+- End-to-end check against the running platform: `uv run pytest -m e2e -k mcp -rs -v`.
+
 ## Submission Extractor Integration (Project 1)
 
 `POST /extract-and-underwrite` calls Project 1 through `SubmissionExtractorPort` (`http_client.py`) to convert raw broker text into a structured submission before underwriting proceeds. A correlation ID (`X-Correlation-ID` header) is generated or propagated end to end, and extraction failures degrade to an explicit `EXTRACTION_UNAVAILABLE` or `PENDING_INFORMATION` workflow status rather than a silent failure.
+The shared workflow lives in  application/extract_and_evaluate_service.py  and is used by both the REST API and the MCP tool  extract_and_evaluate . Fields the extractor cannot provide are never invented; they come from  overrides  or are reported as missing.
 
 ## Project Boundaries
 
@@ -468,7 +543,9 @@ If the knowledge service is unavailable, times out, or returns no relevant citat
 uv run ruff format .
 uv run ruff check .
 uv run mypy src
-uv run pytest
+uv run pytest                 # unit and integration tests; e2e tests are skipped
+uv run pytest -m e2e -rs -v   # end-to-end tests against the running platform (E2E_API_URL, default http://127.0.0.1:8002)
+
 ```
 
 The test suite includes unit and integration coverage for Pydantic submission validation, critical-field completeness checks, underwriting policy loading, deterministic rules and priority handling, cyber risk scoring and score caps, pricing calculations and minimum premium, condition recommendations, decision persistence and review workflow, submission-extractor HTTP client behavior, and FastAPI health, underwriting, and extraction endpoints.
