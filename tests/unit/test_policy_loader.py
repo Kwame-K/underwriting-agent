@@ -10,7 +10,7 @@ def test_default_underwriting_policy_is_loaded() -> None:
     policy = load_underwriting_policy()
 
     assert policy.policy_name == "Cyber SME Underwriting Policy"
-    assert policy.policy_version == "0.5.0"
+    assert policy.policy_version == "0.6.0"
     assert policy.product_line == ProductLine.CYBER_SME
     assert policy.supported_countries == ("Canada",)
     assert "gambling" in policy.excluded_industries
