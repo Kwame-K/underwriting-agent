@@ -1,4 +1,8 @@
+import pytest
+from pydantic import ValidationError
+
 from underwriting_agent.domain.enums import ProductLine
+from underwriting_agent.domain.policy import UnderwritingPolicy
 from underwriting_agent.rules.policy_loader import load_underwriting_policy
 
 
@@ -41,3 +45,18 @@ def test_default_policy_has_documented_security_thresholds() -> None:
         policy.security_controls.backup_requirement_revenue_threshold_cad == 5_000_000
     )
     assert policy.security_controls.edr_requirement_revenue_threshold_cad == 10_000_000
+
+
+def test_default_policy_loads_aliases_for_excluded_industries() -> None:
+    policy = load_underwriting_policy()
+
+    assert "casino" in policy.excluded_industry_aliases["gambling"]
+    assert set(policy.excluded_industry_aliases) <= set(policy.excluded_industries)
+
+
+def test_alias_for_unknown_industry_is_rejected() -> None:
+    raw = load_underwriting_policy().model_dump()
+    raw["excluded_industry_aliases"] = {"unknown industry": ["something"]}
+
+    with pytest.raises(ValidationError, match="not listed in excluded_industries"):
+        UnderwritingPolicy.model_validate(raw)

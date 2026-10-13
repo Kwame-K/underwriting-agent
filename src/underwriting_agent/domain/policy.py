@@ -1,4 +1,4 @@
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from underwriting_agent.domain.condition import UnderwritingCondition
 from underwriting_agent.domain.enums import ProductLine, RiskBand
@@ -59,8 +59,27 @@ class UnderwritingPolicy(BaseModel):
 
     supported_countries: tuple[str, ...] = Field(min_length=1)
     excluded_industries: tuple[str, ...] = Field(default_factory=tuple)
+    excluded_industry_aliases: dict[str, tuple[str, ...]] = Field(
+        default_factory=dict,
+        description="Free-text terms per excluded industry that trigger a referral.",
+    )
 
     authority: UnderwritingAuthority
     security_controls: SecurityControlsPolicy
     pricing: PricingPolicy
     conditions: ConditionsPolicy
+
+    @model_validator(mode="after")
+    def validate_alias_keys(self) -> "UnderwritingPolicy":
+        excluded = {industry.strip().lower() for industry in self.excluded_industries}
+        unknown = sorted(
+            key
+            for key in self.excluded_industry_aliases
+            if key.strip().lower() not in excluded
+        )
+        if unknown:
+            raise ValueError(
+                f"Aliases defined for industries not listed in excluded_industries: {unknown}"
+            )
+
+        return self

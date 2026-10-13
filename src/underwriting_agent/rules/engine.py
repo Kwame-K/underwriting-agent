@@ -1,6 +1,7 @@
 from underwriting_agent.domain.policy import UnderwritingPolicy
 from underwriting_agent.domain.rules import RuleResult, RuleSeverity
 from underwriting_agent.domain.submission import InsuranceSubmission
+from underwriting_agent.rules.industry_matching import contains_term, normalize_text
 from underwriting_agent.rules.policy_loader import load_underwriting_policy
 
 
@@ -44,19 +45,58 @@ class UnderwritingRulesEngine:
         excluded_industries = {
             industry.strip().lower() for industry in self.policy.excluded_industries
         }
-        is_excluded = normalized_industry in excluded_industries
+        if normalized_industry in excluded_industries:
+            return RuleResult(
+                rule_id="UW-CYB-002",
+                rule_name="Excluded industry screening",
+                passed=False,
+                severity=RuleSeverity.DECLINE,
+                message=(
+                    "The applicant industry is explicitly excluded from "
+                    "underwriting appetite."
+                ),
+            )
+
+        match = self._find_industry_match(submission.industry or "")
+        if match is not None:
+            excluded_industry, term = match
+            return RuleResult(
+                rule_id="UW-CYB-002",
+                rule_name="Excluded industry screening",
+                passed=False,
+                severity=RuleSeverity.REFERRAL,
+                message=(
+                    f"The stated activity matches '{term}', related to the excluded "
+                    f"industry '{excluded_industry}'; an underwriter must confirm "
+                    "the activity."
+                ),
+            )
 
         return RuleResult(
             rule_id="UW-CYB-002",
             rule_name="Excluded industry screening",
-            passed=not is_excluded,
+            passed=True,
             severity=RuleSeverity.DECLINE,
-            message=(
-                "The applicant industry is within the current underwriting appetite."
-                if not is_excluded
-                else "The applicant industry is explicitly excluded from underwriting appetite."
-            ),
+            message="The applicant industry is within the current underwriting appetite.",
         )
+
+    def _find_industry_match(self, industry: str) -> tuple[str, str] | None:
+        normalized_text = normalize_text(industry)
+        if not normalized_text:
+            return None
+
+        aliases_by_industry = {
+            key.strip().lower(): aliases
+            for key, aliases in self.policy.excluded_industry_aliases.items()
+        }
+
+        for excluded_industry in self.policy.excluded_industries:
+            aliases = aliases_by_industry.get(excluded_industry.strip().lower(), ())
+            for term in (excluded_industry, *aliases):
+                if contains_term(normalized_text, term):
+                    return excluded_industry, term
+
+        return None
 
     def _evaluate_mfa(self, submission: InsuranceSubmission) -> RuleResult:
         annual_revenue_cad = submission.annual_revenue_cad or 0
