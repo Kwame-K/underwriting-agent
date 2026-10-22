@@ -1,6 +1,7 @@
 from types import SimpleNamespace
 
 import pytest
+from mcp.server.mcpserver.exceptions import ToolError
 
 from underwriting_agent.application.underwriting_service import UnderwritingService
 from underwriting_agent.domain.submission import InsuranceSubmission
@@ -63,7 +64,7 @@ def test_get_decision_raises_when_not_found(
         lambda: SimpleNamespace(get_decision=lambda decision_id: None),
     )
 
-    with pytest.raises(LookupError, match="was not found"):
+    with pytest.raises(ToolError, match="was not found"):
         tools.get_decision("missing")
 
 

@@ -3,6 +3,8 @@
 from typing import Any
 from uuid import uuid4
 
+from mcp.server.mcpserver.exceptions import ToolError
+
 from underwriting_agent.api.dependencies import (
     get_decision_repository,
     get_submission_extractor,
@@ -66,7 +68,7 @@ def get_decision(decision_id: str) -> dict[str, Any]:
     """Retrieve one persisted underwriting decision by identifier."""
     decision = get_decision_repository().get_decision(decision_id)
     if decision is None:
-        raise LookupError(f"Decision '{decision_id}' was not found.")
+        raise ToolError(f"Decision '{decision_id}' was not found.")
     return decision.model_dump(mode="json")
 
 
@@ -74,7 +76,7 @@ def get_audit_trail(decision_id: str) -> list[dict[str, Any]]:
     """Retrieve the immutable audit events for one persisted decision."""
     repository = get_decision_repository()
     if repository.get_decision(decision_id) is None:
-        raise LookupError(f"Decision '{decision_id}' was not found.")
+        raise ToolError(f"Decision '{decision_id}' was not found.")
     return [
         event.model_dump(mode="json")
         for event in repository.list_audit_events(decision_id)

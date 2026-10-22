@@ -42,7 +42,12 @@ def create_session_factory(engine: Engine) -> Callable[[], Session]:
 def run_migrations(database_url: str) -> None:
     config = Config()
     config.set_main_option("script_location", str(MIGRATIONS_DIRECTORY))
-    config.set_main_option("sqlalchemy.url", normalize_database_url(database_url))
+    # configparser treats '%' as interpolation syntax; escape percent-encoded
+    # credentials (for example '%40' for '@') so Alembic reads them back intact.
+    config.set_main_option(
+        "sqlalchemy.url",
+        normalize_database_url(database_url).replace("%", "%%"),
+    )
     command.upgrade(config, "head")
 
 
