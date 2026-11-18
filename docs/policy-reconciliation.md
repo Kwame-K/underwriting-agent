@@ -167,8 +167,8 @@ The current `InsuranceSubmission` model is sufficient for the initial portfolio 
 ### Phase 3 — Evidence governance
 
 - Attach `source_document_id`, `section_reference`, and `citation_id` to rule metadata or policy-reconciliation records.
-- Add `evidence_retrieval_status` to `UnderwritingDecision`.
-- Record `SUCCESS`, `PARTIAL`, `INSUFFICIENT_CONTEXT`, and `UNAVAILABLE` states in the audit trail.
+- Add `evidence_retrieval_status` to `UnderwritingDecision`. (Done.)
+- Record `SUCCESS`, `PARTIAL`, `INSUFFICIENT_CONTEXT`, and `UNAVAILABLE` states in the audit trail. (Done on `DECISION_CREATED`.)
 - Add tests ensuring that missing or unavailable RAG evidence never changes deterministic decision outcomes.
 
 ## Evidence-status policy
