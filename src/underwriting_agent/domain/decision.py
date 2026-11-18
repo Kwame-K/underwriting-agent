@@ -9,6 +9,7 @@ from underwriting_agent.domain.evidence import (
     EvidenceCitation,
     EvidenceRetrievalStatus,
 )
+from underwriting_agent.domain.portfolio_context import PortfolioContext
 from underwriting_agent.domain.pricing import PricingFactor
 from underwriting_agent.domain.risk_score import RiskFactor
 from underwriting_agent.domain.rules import RuleResult
@@ -45,6 +46,7 @@ class UnderwritingDecision(BaseModel):
     unresolved_evidence_finding_ids: list[str] = Field(default_factory=list)
     evidence_retrieval_failure_reason: str | None = None
 
+    portfolio_context: PortfolioContext = Field(default_factory=PortfolioContext)
     policy_version: str
     created_at: datetime = Field(
         default_factory=lambda: datetime.now(UTC),

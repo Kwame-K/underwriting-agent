@@ -4,6 +4,10 @@ from underwriting_agent.application.conditions_service import (
 )
 from underwriting_agent.domain.decision import UnderwritingDecision
 from underwriting_agent.domain.enums import DecisionType
+from underwriting_agent.domain.portfolio_context import (
+    PortfolioContext,
+    PortfolioContextStatus,
+)
 from underwriting_agent.domain.rules import RuleResult, RuleSeverity
 from underwriting_agent.domain.submission import InsuranceSubmission
 from underwriting_agent.integrations.knowledge_agent.no_op_client import (
@@ -11,6 +15,12 @@ from underwriting_agent.integrations.knowledge_agent.no_op_client import (
 )
 from underwriting_agent.integrations.knowledge_agent.port import (
     InsuranceKnowledgeAgentPort,
+)
+from underwriting_agent.integrations.portfolio_analyst.no_op_client import (
+    NoOpPortfolioAnalyst,
+)
+from underwriting_agent.integrations.portfolio_analyst.port import (
+    PortfolioAnalystPort,
 )
 from underwriting_agent.rules.engine import UnderwritingRulesEngine
 from underwriting_agent.scoring.pricing import CyberPricingIndicationService
@@ -26,6 +36,7 @@ class UnderwritingService:
         pricing_service: CyberPricingIndicationService | None = None,
         conditions_recommender: UnderwritingConditionsRecommender | None = None,
         knowledge_agent: InsuranceKnowledgeAgentPort | None = None,
+        portfolio_analyst: PortfolioAnalystPort | None = None,
     ) -> None:
         self.completeness_checker = completeness_checker or CompletenessChecker()
         self.rules_engine = rules_engine or UnderwritingRulesEngine()
@@ -42,8 +53,27 @@ class UnderwritingService:
         )
 
         self.knowledge_agent = knowledge_agent or NoOpInsuranceKnowledgeAgent()
+        self.portfolio_analyst = portfolio_analyst or NoOpPortfolioAnalyst()
 
     def underwrite(self, submission: InsuranceSubmission) -> UnderwritingDecision:
+        decision = self._underwrite_without_portfolio_context(submission)
+        portfolio_context = self._get_portfolio_context(submission)
+        return decision.model_copy(update={"portfolio_context": portfolio_context})
+
+    def _get_portfolio_context(
+        self, submission: InsuranceSubmission
+    ) -> PortfolioContext:
+        try:
+            return self.portfolio_analyst.get_portfolio_context(submission)
+        except Exception as error:  # noqa: BLE001 - context must never block a decision
+            return PortfolioContext(
+                status=PortfolioContextStatus.UNAVAILABLE,
+                failure_reason=str(error),
+            )
+
+    def _underwrite_without_portfolio_context(
+        self, submission: InsuranceSubmission
+    ) -> UnderwritingDecision:
         completeness_result = self.completeness_checker.check(submission)
 
         if not completeness_result.is_complete:

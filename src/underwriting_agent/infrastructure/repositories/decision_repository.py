@@ -94,6 +94,9 @@ class UnderwritingDecisionRepository:
                     "decision": decision.decision.value,
                     "human_review_required": (decision.human_review_required),
                     "policy_version": decision.policy_version,
+                    "portfolio_context": decision.portfolio_context.model_dump(
+                        mode="json"
+                    ),
                     "evidence_retrieval_status": (
                         decision.evidence_retrieval_status.value
                     ),

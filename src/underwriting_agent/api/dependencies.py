@@ -11,6 +11,9 @@ from underwriting_agent.infrastructure.repositories.decision_repository import (
 from underwriting_agent.integrations.knowledge_agent.http_client import (
     HTTPInsuranceKnowledgeAgent,
 )
+from underwriting_agent.integrations.portfolio_analyst.http_client import (
+    HTTPPortfolioAnalyst,
+)
 from underwriting_agent.integrations.submission_extractor.http_client import (
     HTTPSubmissionExtractor,
 )
@@ -23,6 +26,7 @@ from underwriting_agent.integrations.submission_extractor.port import (
 def get_underwriting_service() -> UnderwritingService:
     return UnderwritingService(
         knowledge_agent=HTTPInsuranceKnowledgeAgent(),
+        portfolio_analyst=HTTPPortfolioAnalyst(),
     )
 
 
