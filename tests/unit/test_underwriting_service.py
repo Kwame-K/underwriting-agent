@@ -110,7 +110,6 @@ def test_clean_submission_is_accepted_without_conditions() -> None:
     assert decision.evidence_retrieval_status == EvidenceRetrievalStatus.NOT_REQUESTED
 
 
-
 def test_excluded_industry_is_declined() -> None:
     submission = InsuranceSubmission(
         submission_id="SUB-UW-DECLINE-001",
