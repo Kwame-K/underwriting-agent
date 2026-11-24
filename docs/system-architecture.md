@@ -4,17 +4,17 @@
 
 This document describes the architecture of the **Underwriting Agent**, Project 4 of a five-project insurance agentic AI portfolio.
 
-The application evaluates structured cyber-insurance submissions for Canadian SMEs through a strict, deterministic decision hierarchy: input validation, completeness checking, decline rules, referral rules, risk scoring, pricing, condition recommendation, documentary evidence retrieval, persistence, and optional human review. It integrates two external HTTP services — the Submission Extractor (Project 1) and the Insurance Knowledge Agent (Project 3) — without allowing either to override a deterministic underwriting outcome.
+The application evaluates structured cyber-insurance submissions for Canadian SMEs through a strict, deterministic decision hierarchy: input validation, completeness checking, decline rules, referral rules, risk scoring, pricing, condition recommendation, documentary evidence retrieval, persistence, and optional human review. It integrates three external HTTP services — the Submission Extractor (Project 1), the Insurance Knowledge Agent (Project 3), and the Data Analyst Agent (Project 2) — without allowing any of them to override a deterministic underwriting outcome.
 
 This is a portfolio and learning project. All rules, scores, pricing factors, and documents are synthetic. The system does not bind coverage, set commercial pricing, or make real underwriting decisions.
 
 ## Design Goals
 
 - **Deterministic decisions first:** critical outcomes (`DECLINE`, `REFER`, `NEED_MORE_INFORMATION`) are computed by Python rules and versioned YAML, never by a generative model.
-- **RAG and extraction are assistive, not authoritative:** external services enrich a decision with evidence or structured input; they cannot change the decision hierarchy's outcome.
-- **Full traceability:** every decision persists its rule results, risk factors, conditions, evidence, and a complete audit trail.
-- **Service isolation over shared state:** Projects 1 and 3 are reached exclusively through their own versioned HTTP APIs, never through direct database or vector-store access.
-- **Fail-safe degradation:** an unavailable external service produces an explicit status (empty evidence, `EXTRACTION_UNAVAILABLE`) rather than blocking or silently altering a deterministic decision.
+- **RAG, extraction, and portfolio metrics are assistive, not authoritative:** external services enrich a decision with evidence, structured input, or review context; they cannot change the decision hierarchy's outcome.
+- **Full traceability:** every decision persists its rule results, risk factors, conditions, evidence, retrieval status, portfolio context, and a complete audit trail.
+- **Service isolation over shared state:** Projects 1, 2, and 3 are reached exclusively through their own versioned HTTP APIs, never through direct database or vector-store access.
+- **Fail-safe degradation:** an unavailable external service produces an explicit status (empty evidence, `EXTRACTION_UNAVAILABLE`, `portfolio_context.status=UNAVAILABLE`) rather than blocking or silently altering a deterministic decision.
 - **Human-in-the-loop:** submissions outside automated authority are persisted as `PENDING_REVIEW` and require an explicit reviewer command to resolve.
 
 ## High-Level Architecture
@@ -45,15 +45,18 @@ flowchart TD
     Q --> R[Project 3: Insurance Knowledge Agent HTTP API]
     R --> S[UnderwritingDecision]
     P --> S
+    S --> PA[PortfolioAnalystPort]
+    PA --> P2[Project 2: Data Analyst Agent]
+    P2 --> S2[Decision + portfolio_context]
 
-    S --> T[UnderwritingDecisionRepository]
+    S2 --> T[UnderwritingDecisionRepository]
     T --> U[SQLAlchemy: submissions, decisions, audit_events]
-    S -- human_review_required=true --> V[PENDING_REVIEW]
+    S2 -- human_review_required=true --> V[PENDING_REVIEW]
     V --> W["POST /decisions/{id}/review"]
     W --> T
 ```
 
-The route to a decision is fixed before any external service is called. Neither the extraction service nor the knowledge agent can be positioned ahead of the decline/referral rules in the decision hierarchy.
+The route to a decision is fixed before any external service is called. Neither the extraction service, the knowledge agent, nor the portfolio analyst can be positioned ahead of the decline/referral rules in the decision hierarchy. Portfolio context is attached after the decision is formed.
 
 ## Main Components
 
@@ -65,20 +68,26 @@ The route to a decision is fixed before any external service is called. Neither 
 | `application/underwriting_service.py` | Orchestrates the full decision hierarchy for a validated submission | No |
 | `application/completeness_service.py` | Determines whether critical submission fields are present | No |
 | `application/conditions_service.py` | Recommends underwriting conditions from policy templates | No |
-| `domain/submission.py`, `domain/decision.py`, `domain/rules.py`, etc. | Pydantic contracts for submissions, decisions, rule results, evidence, review, and audit events | No |
+| `application/extract_and_evaluate_service.py` | Shared extract-map-underwrite workflow for REST and MCP | No |
+| `application/submission_mapper.py` | Maps extractor output onto `InsuranceSubmission` | No |
+| `domain/submission.py`, `domain/decision.py`, `domain/rules.py`, etc. | Pydantic contracts for submissions, decisions, rule results, evidence, review, audit events, and portfolio context | No |
 | `rules/engine.py` | Evaluates deterministic decline/referral rules against the loaded policy | No |
+| `rules/industry_matching.py` | Case-, accent-, and punctuation-insensitive industry alias matching | No |
 | `rules/policy_loader.py` | Loads and validates `configs/underwriting_policy.yaml` | No |
 | `scoring/risk_score.py` | Computes the 0–100 deterministic cyber-risk score and risk band | No |
 | `scoring/pricing.py` | Computes the synthetic pricing indication | No |
+| `mcp_server/tools.py` | MCP tools that reuse the same application services as the REST API | No |
 | `integrations/knowledge_agent/http_client.py` | Calls Project 3's `/v1/retrieve-evidence` endpoint | Yes (Project 3) |
 | `integrations/knowledge_agent/no_op_client.py` | Default no-op implementation used when no knowledge agent is configured | No |
+| `integrations/portfolio_analyst/http_client.py` | Calls Project 2's `/v1/portfolio-quality-metrics` endpoint | Yes (Project 2) |
+| `integrations/portfolio_analyst/no_op_client.py` | Default no-op implementation used when no portfolio analyst is configured | No |
 | `integrations/submission_extractor/http_client.py` | Calls Project 1's extraction endpoint | Yes (Project 1) |
-| `infrastructure/persistence/database.py` | Creates the SQLAlchemy engine and session factory from `settings.database_url` | No |
+| `infrastructure/persistence/database.py` | Creates the SQLAlchemy engine and session factory; runs Alembic for PostgreSQL | No |
 | `infrastructure/persistence/models.py` | ORM records for submissions, decisions, and audit events | No |
 | `infrastructure/repositories/decision_repository.py` | Persists submissions/decisions, lists by review status, records reviewer commands, returns audit trails | No |
-| `settings.py` | Loads `KNOWLEDGE_AGENT_BASE_URL`, `SUBMISSION_EXTRACTOR_BASE_URL`, `DATABASE_URL`, and timeouts from environment/`.env` | No |
+| `settings.py` | Loads knowledge-agent, extractor, portfolio-analyst, and database settings from environment/`.env` | No |
 
-The business layer (`application/`, `domain/`, `rules/`, `scoring/`) has no direct dependency on FastAPI, SQLAlchemy, or any HTTP client library. Integrations are injected through ports (`InsuranceKnowledgeAgentPort`, `SubmissionExtractorPort`), so a provider change requires no change to the decision hierarchy.
+The business layer (`application/`, `domain/`, `rules/`, `scoring/`) has no direct dependency on FastAPI, SQLAlchemy, or any HTTP client library. Integrations are injected through ports (`InsuranceKnowledgeAgentPort`, `SubmissionExtractorPort`, `PortfolioAnalystPort`), so a provider change requires no change to the decision hierarchy.
 
 ## Decision Hierarchy
 
@@ -95,6 +104,8 @@ The business layer (`application/`, `domain/`, `rules/`, `scoring/`) has no dire
 10. Human underwriting review when human_review_required = true
 ```
 
+After step 8, `UnderwritingService` attaches Project 2 `portfolio_context` without changing `decision`, `risk_score`, or pricing.
+
 Notably, evidence retrieval is called on **both** the decline path and the accepted/referred path in `underwriting_service.py`, so even a declined submission carries supporting citations for its reasons — the knowledge agent never influences whether the decline happens.
 
 ## Underwrite Request Sequence
@@ -108,6 +119,7 @@ sequenceDiagram
     participant Scoring as CyberRiskScoringService
     participant Pricing as CyberPricingIndicationService
     participant Knowledge as InsuranceKnowledgeAgentPort
+    participant Portfolio as PortfolioAnalystPort
     participant Repo as UnderwritingDecisionRepository
 
     Client->>API: POST /underwrite (InsuranceSubmission)
@@ -130,6 +142,8 @@ sequenceDiagram
             Service-->>API: REFER / PENDING_UNDERWRITING + evidence
         end
     end
+    Service->>Portfolio: get_portfolio_context(submission)
+    Portfolio-->>Service: SUCCESS or UNAVAILABLE
     API->>Repo: save_submission_and_decision(submission, decision)
     Repo-->>API: persisted
     API-->>Client: UnderwritingDecision JSON
@@ -187,9 +201,9 @@ UnderwritingDecisionRepository.review_decision()
 
 ## Persistence Architecture
 
-The application uses SQLAlchemy against SQLite by default (`sqlite:///data/underwriting_agent.db` locally, or a mounted volume in Docker). `infrastructure/persistence/models.py` defines ORM records for submissions, decisions, and audit events; `infrastructure/repositories/decision_repository.py` is the sole component allowed to read or write these records, keeping the domain layer free of persistence concerns.
+The application uses SQLAlchemy against SQLite by default (`sqlite:///data/underwriting_agent.db` locally, or a mounted volume in Docker). When `DATABASE_URL` is a PostgreSQL URL, `initialize_database()` runs Alembic migrations instead of `create_all`. `infrastructure/persistence/models.py` defines ORM records for submissions, decisions, and audit events; `infrastructure/repositories/decision_repository.py` is the sole component allowed to read or write these records, keeping the domain layer free of persistence concerns.
 
-Every `save_submission_and_decision()` call also appends an `AuditEvent`, and every reviewer action appends a further audit event, so `GET /decisions/{id}/audit-trail` always reflects the complete history of a decision from creation to final review.
+Every `save_submission_and_decision()` call also appends an `AuditEvent`, and every reviewer action appends a further audit event, so `GET /decisions/{id}/audit-trail` always reflects the complete history of a decision from creation to final review. The `DECISION_CREATED` payload includes `evidence_retrieval_status` and `portfolio_context`.
 
 ## Insurance Knowledge Agent Integration (Project 3)
 
@@ -217,6 +231,20 @@ HTTP client  -->  Project 1 extraction endpoint (port 8000)
 
 A correlation ID (`X-Correlation-ID` header) is generated if absent and echoed back in the response headers, allowing a single request to be traced across both services' logs.
 
+## Data Analyst Agent Integration (Project 2)
+
+```text
+UnderwritingService (after the deterministic decision is formed)
+    v
+PortfolioAnalystPort (interface)
+    v
+HTTPPortfolioAnalyst  -->  Project 2 POST /v1/portfolio-quality-metrics (port 8003)
+    or
+NoOpPortfolioAnalyst  -->  returns NOT_REQUESTED
+```
+
+The client selects the submission province from the provincial dimension. A timeout, HTTP error, or missing province row becomes `PortfolioContextStatus.UNAVAILABLE` and is stored on the decision without changing underwriting outcome.
+
 ## Failure Handling
 
 | Condition | Required behavior |
@@ -224,6 +252,7 @@ A correlation ID (`X-Correlation-ID` header) is generated if absent and echoed b
 | Missing critical submission fields | Return `NEED_MORE_INFORMATION`; no risk decision is computed |
 | Decline rule triggered | Return `DECLINE` with evidence attempt; risk score is not computed |
 | Knowledge agent unavailable or times out | Persist decision with empty/partial evidence and a recorded failure reason; decision outcome is unaffected |
+| Portfolio analyst unavailable, times out, or has no province row | Persist `portfolio_context.status=UNAVAILABLE`; decision outcome is unaffected |
 | Submission extractor unreachable | Return `EXTRACTION_UNAVAILABLE`; do not attempt underwriting on unvalidated data |
 | Extraction incomplete or flagged for review | Return `PENDING_INFORMATION` with missing fields; do not attempt underwriting |
 | Unknown decision ID on review | Raise `LookupError` -> HTTP 404 |
@@ -251,15 +280,15 @@ Never tracked by Git
 
 Planned next steps documented in the roadmap require:
 
-1. Surfacing Project 3's retrieval status (`SUCCESS`/`PARTIAL`/`INSUFFICIENT_CONTEXT`) directly as a structured audit-event type.
-2. Introducing LangGraph or an equivalent explicit orchestration graph around `underwriting_service.py`, making the referral pause and multi-service retries first-class graph nodes.
-3. Adding a circuit breaker/retry policy around both HTTP integration clients.
-4. Integrating Project 2 (Data Analyst Agent) for portfolio-level context without altering the deterministic hierarchy.
+1. Introducing LangGraph or an equivalent explicit orchestration graph around `underwriting_service.py`, making the referral pause and multi-service retries first-class graph nodes.
+2. Adding a circuit breaker/retry policy around the Project 1, Project 2, and Project 3 HTTP clients.
+3. Adding an LLM-generated underwriter summary strictly from verified facts and citations.
 
 ## Current Limitations
 
 - Only the `CYBER_SME` product line is supported.
 - Pricing is a synthetic technical indication, not a commercial premium.
 - The knowledge-agent integration depends on Project 3 running and being correctly indexed; a stopped Project 3 degrades to empty evidence rather than failing the request.
-- SQLite is single-writer; concurrent underwriters reviewing decisions at scale would benefit from a multi-writer database.
+- The portfolio-analyst integration depends on Project 2; a stopped Project 2 degrades to `UNAVAILABLE` context rather than failing the request.
+- SQLite is the local default and is single-writer; PostgreSQL is supported through Alembic when `DATABASE_URL` points at Postgres.
 - There is no LangGraph or workflow-engine orchestration yet; the decision hierarchy is expressed as sequential Python calls in `underwriting_service.py`.

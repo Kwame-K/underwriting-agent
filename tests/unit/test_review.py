@@ -4,6 +4,7 @@ from pydantic import ValidationError
 from underwriting_agent.domain.review import (
     DecisionReviewStatus,
     ReviewDecisionCommand,
+    UnderwriterModifications,
     UnderwriterReviewAction,
 )
 
@@ -32,11 +33,11 @@ def test_modify_review_accepts_modified_terms() -> None:
         action=UnderwriterReviewAction.MODIFY,
         reviewer_id="underwriter-001",
         comment="Limit and premium adjusted after review.",
-        modifications={
-            "approved_limit_cad": 750_000,
-            "annual_premium_cad": 18_500,
-            "added_conditions": ["MFA must be enabled before policy inception."],
-        },
+        modifications=UnderwriterModifications(
+            approved_limit_cad=750_000,
+            annual_premium_cad=18_500,
+            added_conditions=["MFA must be enabled before policy inception."],
+        ),
     )
 
     assert command.resulting_status is (DecisionReviewStatus.UNDERWRITER_MODIFIED)
@@ -50,7 +51,5 @@ def test_non_modify_review_cannot_include_modifications() -> None:
             action=UnderwriterReviewAction.APPROVE,
             reviewer_id="underwriter-001",
             comment="Approved.",
-            modifications={
-                "approved_limit_cad": 750_000,
-            },
+            modifications=UnderwriterModifications(approved_limit_cad=750_000),
         )

@@ -50,7 +50,7 @@ jobs:
         run: uv run ruff check .
 
       - name: Type check
-        run: uv run mypy src
+        run: uv run mypy src tests
 
       - name: Create data directory for SQLite
         run: mkdir -p data
@@ -78,3 +78,44 @@ jobs:
 
       - name: Build Docker image
         run: docker build --tag underwriting-agent:ci .
+
+  postgres-migrations:
+    name: PostgreSQL migrations
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    needs: quality-and-tests
+
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_PASSWORD: ci
+          POSTGRES_DB: underwriting
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      TEST_POSTGRES_URL: postgresql://postgres:ci@localhost:5432/underwriting
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d  # v10.0.1
+        with:
+          enable-cache: true
+
+      - name: Install Python 3.11
+        run: uv python install 3.11
+
+      - name: Install locked dependencies
+        run: uv sync --locked --all-groups
+
+      - name: Run PostgreSQL migration tests
+        run: uv run pytest tests/integration/test_postgres_migrations.py -v -rs

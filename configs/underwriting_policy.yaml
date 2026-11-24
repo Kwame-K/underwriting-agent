@@ -1,5 +1,5 @@
 policy_name: Cyber SME Underwriting Policy
-policy_version: 0.5.0
+policy_version: 0.6.0
 product_line: CYBER_SME
 
 supported_countries:
@@ -11,6 +11,59 @@ excluded_industries:
   - cryptocurrency mining
   - gambling
   - weapons manufacturing
+
+# Free-text terms that trigger an underwriter referral (never an automatic decline).
+# Keys must be listed in excluded_industries. Matching ignores case, accents and
+# punctuation, and requires whole words.
+excluded_industry_aliases:
+  adult entertainment:
+    - "adult content"
+    - "pornography"
+    - "escort services"
+    - "strip club"
+    - "adult film"
+    - "divertissement pour adultes"
+    - "pornographie"
+    - "club de danseuses"
+  cryptocurrency exchange:
+    - "crypto exchange"
+    - "bitcoin exchange"
+    - "digital asset exchange"
+    - "crypto trading platform"
+    - "cryptocurrency trading platform"
+    - "plateforme d'echange de cryptomonnaies"
+    - "bourse de cryptomonnaies"
+  cryptocurrency mining:
+    - "bitcoin mining"
+    - "crypto mining"
+    - "ethereum mining"
+    - "cryptomining"
+    - "minage de cryptomonnaies"
+    - "minage de bitcoin"
+  gambling:
+    - "casino"
+    - "sports betting"
+    - "sportsbook"
+    - "online betting"
+    - "betting"
+    - "bookmaker"
+    - "lottery"
+    - "poker"
+    - "jeux de hasard"
+    - "jeu d'argent"
+    - "jeux d'argent"
+    - "paris sportifs"
+    - "loterie"
+  weapons manufacturing:
+    - "firearms manufacturer"
+    - "firearms manufacturing"
+    - "gun manufacturer"
+    - "ammunition manufacturer"
+    - "weapons maker"
+    - "arms manufacturing"
+    - "fabrication d'armes"
+    - "fabricant d'armes"
+    - "fabrication de munitions"
 
 authority:
   max_automated_limit_cad: 2000000

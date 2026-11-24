@@ -2,9 +2,9 @@
 
 [![Continuous Integration](../../actions/workflows/ci.yml/badge.svg)](../../actions/workflows/ci.yml)
 
-An explainable cyber-insurance underwriting workflow for Canadian small and medium-sized enterprises. The service validates a submission, checks underwriting appetite, calculates a deterministic cyber-risk score, produces a synthetic pricing indication, recommends underwriting conditions, retrieves documentary evidence from the Insurance Knowledge Agent, and persists every decision with a full audit trail and human-review workflow.
+An explainable cyber-insurance underwriting workflow for Canadian small and medium-sized enterprises. The service validates a submission, checks underwriting appetite, calculates a deterministic cyber-risk score, produces a synthetic pricing indication, recommends underwriting conditions, retrieves documentary evidence from the Insurance Knowledge Agent, attaches assistive portfolio context from the Data Analyst Agent, and persists every decision with a full audit trail and human-review workflow.
 
-This repository is **Project 4** in a five-project insurance agentic AI portfolio. It combines deterministic underwriting controls with two external services (a submission extractor and a RAG knowledge agent) while keeping material underwriting decisions auditable and under explicit rule control.
+This repository is **Project 4** in a five-project insurance agentic AI portfolio. It combines deterministic underwriting controls with three external HTTP services (a submission extractor, a RAG knowledge agent, and a portfolio analyst) while keeping material underwriting decisions auditable and under explicit rule control.
 
 > **Scope note:** this is a portfolio and learning project. All underwriting rules, risk scores, pricing factors, documents, decisions, and examples are synthetic or demonstrative. The system must not be used to bind coverage, set a commercial premium, or make real underwriting decisions.
 
@@ -20,12 +20,15 @@ This repository is **Project 4** in a five-project insurance agentic AI portfoli
 - Synthetic pricing indication using revenue, limit, retention, and risk band.
 - Structured underwriting conditions and information requests.
 - Human-review workflow with persisted decisions and reviewer commands.
-- SQLAlchemy persistence (SQLite by default) for submissions, decisions, reviews, and audit events.
+- SQLAlchemy persistence (SQLite by default; PostgreSQL via Alembic when `DATABASE_URL` is a Postgres URL) for submissions, decisions, reviews, and audit events.
 - HTTP integration with Project 3 (Insurance Knowledge Agent / RAG service) for documentary evidence.
 - HTTP integration with Project 1 (Submission Extractor) through `POST /extract-and-underwrite`.
-- Graceful fallback when the knowledge service or extractor is unavailable.
+- HTTP integration with Project 2 (Data Analyst Agent) for assistive provincial portfolio context; it never changes the underwriting decision.
+- MCP stdio server (`underwriting-mcp`) exposing the same workflow as tools.
+- Graceful fallback when the knowledge service, extractor, or portfolio analyst is unavailable.
+- `evidence_retrieval_status` on the decision and in the `DECISION_CREATED` audit payload.
 - Documented policy-reconciliation process aligning executable rules with documentary evidence.
-- `uv`, Git, Ruff, mypy, pytest, and GitHub Actions-ready project structure.
+- `uv`, Git, Ruff, mypy, pytest, Docker, and GitHub Actions CI.
 
 ## System Design
 
@@ -61,6 +64,8 @@ HTTPInsuranceKnowledgeAgent --> Project 3 (Qdrant + semantic retrieval + citatio
         v
 UnderwritingDecision
         |
+        +-- HTTPPortfolioAnalyst --> Project 2 (assistive context; does not change the decision)
+        |
         v
 UnderwritingDecisionRepository (SQLAlchemy persistence + audit trail)
         |
@@ -85,14 +90,16 @@ The project follows a strict hierarchy. A generative model or retrieval componen
 10. Human underwriting review when required
 ```
 
+After the decision is formed, Project 2 portfolio context is attached as `portfolio_context`. That call cannot change `decision`, `risk_score`, or pricing.
+
 | Decision | Meaning |
 |---|---|
 | `NEED_MORE_INFORMATION` | Critical submission data is missing; no risk decision can proceed |
 | `DECLINE` | The submission is outside the documented underwriting appetite |
 | `REFER` | The submission requires review by an authorized underwriter |
-| `PENDING_UNDERWRITING` | The submission meets current deterministic rules; later workflow stages may continue |
-| `ACCEPT_WITH_CONDITIONS` | Reserved for a later workflow stage with explicit approval authority |
-| `ACCEPT` | Reserved for a later workflow stage with explicit approval authority |
+| `ACCEPT` | The submission meets all deterministic rules and no condition is recommended |
+| `ACCEPT_WITH_CONDITIONS` | The submission meets all deterministic rules; recommended conditions must be satisfied before binding |
+| `PENDING_UNDERWRITING` | Legacy value, no longer produced by the current workflow |
 
 ## Repository Structure
 
@@ -100,12 +107,10 @@ The project follows a strict hierarchy. A generative model or retrieval componen
 underwriting-agent/
 ├── configs/
 │   └── underwriting_policy.yaml          # Versioned synthetic business policy
-├── data/
-│   ├── synthetic/
-│   ├── evaluation/
-│   └── underwriting_agent.db             # Local SQLite database
+├── data/                                 # Local SQLite file created at runtime
 ├── docs/
-│   └── policy-reconciliation.md          # Reconciles YAML rules with Project 3 documentary evidence
+│   ├── policy-reconciliation.md          # Reconciles YAML rules with Project 3 documentary evidence
+│   └── system-architecture.md
 ├── src/underwriting_agent/
 │   ├── api/
 │   │   ├── app.py                        # FastAPI application and routes
@@ -114,6 +119,8 @@ underwriting-agent/
 │   ├── application/
 │   │   ├── completeness_service.py
 │   │   ├── conditions_service.py
+│   │   ├── extract_and_evaluate_service.py
+│   │   ├── submission_mapper.py
 │   │   └── underwriting_service.py
 │   ├── domain/
 │   │   ├── audit.py                      # AuditEvent, AuditEventType
@@ -123,6 +130,7 @@ underwriting-agent/
 │   │   ├── enums.py
 │   │   ├── evidence.py
 │   │   ├── policy.py
+│   │   ├── portfolio_context.py
 │   │   ├── pricing.py
 │   │   ├── review.py                     # DecisionReview, ReviewDecisionCommand
 │   │   ├── risk_score.py
@@ -130,7 +138,8 @@ underwriting-agent/
 │   │   └── submission.py
 │   ├── infrastructure/
 │   │   ├── persistence/
-│   │   │   ├── database.py               # SQLAlchemy engine and session factory
+│   │   │   ├── database.py               # SQLAlchemy engine, session factory, Alembic for Postgres
+│   │   │   ├── migrations/
 │   │   │   └── models.py                 # ORM records for submissions, decisions, reviews, audit events
 │   │   └── repositories/
 │   │       └── decision_repository.py    # UnderwritingDecisionRepository
@@ -139,33 +148,48 @@ underwriting-agent/
 │   │   │   ├── http_client.py            # Calls Project 3
 │   │   │   ├── no_op_client.py
 │   │   │   └── port.py
+│   │   ├── portfolio_analyst/
+│   │   │   ├── http_client.py            # Calls Project 2
+│   │   │   ├── no_op_client.py
+│   │   │   └── port.py
 │   │   └── submission_extractor/
 │   │       ├── http_client.py            # Calls Project 1
 │   │       ├── models.py
 │   │       └── port.py
+│   ├── mcp_server/
+│   │   ├── server.py
+│   │   └── tools.py
 │   ├── rules/
 │   │   ├── engine.py
+│   │   ├── industry_matching.py
 │   │   └── policy_loader.py
 │   ├── scoring/
 │   │   ├── pricing.py
 │   │   └── risk_score.py
 │   └── settings.py
 ├── tests/
+│   ├── e2e/
 │   ├── integration/
 │   │   ├── test_extract_and_underwrite_api.py
-│   │   └── test_health_api.py
+│   │   ├── test_health_api.py
+│   │   └── test_postgres_migrations.py
 │   └── unit/
 │       ├── test_completeness_service.py
 │       ├── test_conditions_service.py
 │       ├── test_decision_repository.py
+│       ├── test_mcp_tools.py
 │       ├── test_policy_loader.py
+│       ├── test_portfolio_context.py
 │       ├── test_pricing_service.py
 │       ├── test_review.py
 │       ├── test_risk_scoring_service.py
 │       ├── test_rules_engine.py
 │       ├── test_submission.py
+│       ├── test_submission_mapper.py
 │       └── test_submission_extractor_http_client.py
 ├── .env.example
+├── .github/workflows/ci.yml
+├── Dockerfile
 ├── compose.yaml
 ├── pyproject.toml
 └── README.md
@@ -180,6 +204,7 @@ underwriting-agent/
 - Git
 - Project 3 running locally only when testing real RAG evidence retrieval
 - Project 1 running locally only when testing `POST /extract-and-underwrite`
+- Project 2 running locally only when testing live portfolio context
 
 ### Setup
 
@@ -199,10 +224,13 @@ Expected local development configuration:
 
 ```dotenv
 KNOWLEDGE_AGENT_BASE_URL=http://127.0.0.1:8001
-KNOWLEDGE_AGENT_TIMEOUT_SECONDS=10
+KNOWLEDGE_AGENT_TIMEOUT_SECONDS=20
 
 SUBMISSION_EXTRACTOR_BASE_URL=http://127.0.0.1:8000
 SUBMISSION_EXTRACTOR_TIMEOUT_SECONDS=30
+
+PORTFOLIO_ANALYST_BASE_URL=http://127.0.0.1:8003
+PORTFOLIO_ANALYST_TIMEOUT_SECONDS=30
 
 DATABASE_URL=sqlite:///data/underwriting_agent.db
 ```
@@ -213,11 +241,14 @@ Do not commit `.env`. Commit `.env.example` only.
 
 The synthetic policy is located at `configs/underwriting_policy.yaml` and contains supported countries, excluded industries, automated underwriting authority thresholds, MFA requirements, scoring and pricing factors, condition templates, and a policy version.
 
+**Excluded industries.** An exact match with `excluded_industries` is declined (`UW-CYB-002`). Free-text activity matching an entry of `excluded_industry_aliases` (English and French terms, case- and accent-insensitive, whole words) is **referred** to an underwriter instead of declined. Aliases require review by the underwriting team before any production use.
+
+
 Example:
 
 ```yaml
 policy_name: Cyber SME Underwriting Policy
-policy_version: 0.4.0
+policy_version: 0.6.0
 product_line: CYBER_SME
 
 supported_countries:
@@ -233,13 +264,13 @@ Every material change to a rule, threshold, factor, condition, or exclusion shou
 
 ## Run the API
 
-Start the Underwriting Agent on port `8000`:
+Start the Underwriting Agent on port `8002` so it does not collide with the Submission Extractor on port `8000`:
 
 ```bash
-uv run uvicorn underwriting_agent.api.app:app --reload --port 8000
+uv run uvicorn underwriting_agent.api.app:app --reload --port 8002
 ```
 
-Open the interactive OpenAPI interface at `http://127.0.0.1:8000/docs`.
+Open the interactive OpenAPI interface at `http://127.0.0.1:8002/docs`. Docker Compose and the platform stack publish the same port.
 
 Available endpoints:
 
@@ -256,7 +287,7 @@ Available endpoints:
 ### Health Check
 
 ```bash
-curl "http://127.0.0.1:8000/health"
+curl "http://127.0.0.1:8002/health"
 ```
 
 ```json
@@ -270,7 +301,7 @@ curl "http://127.0.0.1:8000/health"
 ### High-risk cyber SME example
 
 ```bash
-curl -X POST "http://127.0.0.1:8000/underwrite" \
+curl -X POST "http://127.0.0.1:8002/underwrite" \
   -H "Content-Type: application/json" \
   -d '{
     "submission_id": "SUB-HIGH-RISK-RAG-001",
@@ -302,9 +333,15 @@ Expected underwriting outcome:
   "risk_band": "SEVERE",
   "base_exposure_premium_cad": 24000.0,
   "indicated_premium_cad": 40800.0,
-  "policy_version": "0.4.0",
+  "policy_version": "0.6.0",
   "scoring_model_version": "0.1.0",
   "pricing_model_version": "0.1.0",
+  "evidence_retrieval_status": "SUCCESS",
+  "portfolio_context": {
+    "status": "SUCCESS",
+    "scope": "PROVINCE_ALL_LINES",
+    "province": "QC"
+  },
   "evidence": [
     {
       "source_document_title": "Cyber Insurance Underwriting Guide",
@@ -315,16 +352,16 @@ Expected underwriting outcome:
 }
 ```
 
-The exact citations depend on the documents indexed by Project 3. This request is automatically persisted, so the decision becomes retrievable through `GET /decisions/{decision_id}`.
+The exact citations depend on the documents indexed by Project 3. `portfolio_context.status` is `UNAVAILABLE` when Project 2 is down; the underwriting outcome is unchanged. This request is automatically persisted, so the decision becomes retrievable through `GET /decisions/{decision_id}` using the `decision_id` (`DEC-…`) returned in the response, not the `submission_id`.
 
 ### List and review referred decisions
 
 ```bash
-curl "http://127.0.0.1:8000/decisions?status=PENDING_REVIEW"
+curl "http://127.0.0.1:8002/decisions?status=PENDING_REVIEW"
 ```
 
 ```bash
-curl -X POST "http://127.0.0.1:8000/decisions/SUB-HIGH-RISK-RAG-001/review" \
+curl -X POST "http://127.0.0.1:8002/decisions/DEC-00000000-0000-0000-0000-000000000001/review" \
   -H "Content-Type: application/json" \
   -d '{
     "reviewer_id": "UW-001",
@@ -333,16 +370,23 @@ curl -X POST "http://127.0.0.1:8000/decisions/SUB-HIGH-RISK-RAG-001/review" \
   }'
 ```
 
+Replace `DEC-00000000-0000-0000-0000-000000000001` with the `decision_id` from `POST /underwrite`.
+
 ### Inspect the audit trail
 
 ```bash
-curl "http://127.0.0.1:8000/decisions/SUB-HIGH-RISK-RAG-001/audit-trail"
+curl "http://127.0.0.1:8002/decisions/DEC-00000000-0000-0000-0000-000000000001/audit-trail"
 ```
 
 ### Extract and underwrite from raw text (Project 1 integration)
 
+Start the stack with `insurance-agentic-platform` (`docker compose up --build -d`);
+the Underwriting Agent is then served on `http://127.0.0.1:8002`. When running
+`uvicorn` locally, use `--port 8002` so it does not collide with the Submission
+Extractor on port 8000.
+
 ```bash
-curl -X POST "http://127.0.0.1:8000/extract-and-underwrite" \
+curl -X POST "http://127.0.0.1:8002/extract-and-underwrite" \
   -H "Content-Type: application/json" \
   -H "X-Correlation-ID: corr-0001" \
   -d '{
@@ -350,11 +394,27 @@ curl -X POST "http://127.0.0.1:8000/extract-and-underwrite" \
     "source_type": "EMAIL",
     "document_name": "broker-submission.eml",
     "content": "Applicant: Retail Services Inc. ... ",
-    "language": "en"
+    "language": "en",
+    "overrides": {
+      "mfa_enabled": true,
+      "requested_limit_cad": 1000000,
+      "requested_retention_cad": 25000
+    },
+    "persist": false
   }'
 ```
 
-If Project 1 extraction is incomplete or flagged for review, the workflow returns `PENDING_INFORMATION` with missing fields instead of proceeding to underwriting. If Project 1 is unreachable, it returns `EXTRACTION_UNAVAILABLE` rather than failing silently.
+`overrides` supplies values the extractor cannot provide (for example MFA,
+requested limit and retention, prior cyber claims). `persist` defaults to `false`;
+with `true`, only a complete evaluation is saved.
+
+| `workflow_status` | Meaning |
+|---|---|
+| `EVALUATED` | Extraction mapped and underwritten; the decision is in the response |
+| `PENDING_INFORMATION` | Extraction needs review, mapping failed, or critical fields are missing (`missing_fields`); nothing is persisted |
+| `UNSUPPORTED_SUBMISSION` | The submission does not request cyber coverage |
+| `EXTRACTION_UNAVAILABLE` | Project 1 is unreachable or returned an invalid response |
+
 
 ## Pricing Indication
 
@@ -400,14 +460,14 @@ The API returns the individual `risk_factors` that contributed to the result, ma
 
 ## Persistence and Audit Trail
 
-Every `POST /underwrite` call persists the submission, the decision, and an audit event through `UnderwritingDecisionRepository`, backed by SQLAlchemy (SQLite by default at `data/underwriting_agent.db`). Decisions requiring human review are stored with `PENDING_REVIEW` status until an underwriter records a review command via `POST /decisions/{decision_id}/review`. The full audit trail (submission, decision, review actions) is retrievable at any time through `GET /decisions/{decision_id}/audit-trail`.
+Every `POST /underwrite` call persists the submission, the decision, and an audit event through `UnderwritingDecisionRepository`, backed by SQLAlchemy (SQLite by default at `data/underwriting_agent.db`; PostgreSQL when `DATABASE_URL` is a Postgres URL, migrated with Alembic). Decisions requiring human review are stored with `PENDING_REVIEW` status until an underwriter records a review command via `POST /decisions/{decision_id}/review`. The full audit trail (submission, decision, review actions) is retrievable at any time through `GET /decisions/{decision_id}/audit-trail`. The `DECISION_CREATED` event records `evidence_retrieval_status` and `portfolio_context`.
 
 ## Insurance Knowledge Agent Integration (Project 3)
 
 Project 4 does not access Qdrant or insurance documents directly. Instead, it calls Project 3 through a versioned HTTP boundary.
 
 ```text
-Project 4 Underwriting Agent, http://127.0.0.1:8000
+Project 4 Underwriting Agent, http://127.0.0.1:8002
         |
         v
 HTTPInsuranceKnowledgeAgent
@@ -438,40 +498,113 @@ Second terminal, Project 4:
 
 ```bash
 cd /path/to/underwriting-agent
-uv run uvicorn underwriting_agent.api.app:app --reload --port 8000
+uv run uvicorn underwriting_agent.api.app:app --reload --port 8002
 ```
 
 ### Resilience principle
 
-If the knowledge service is unavailable, times out, or returns no relevant citation, the underwriting decision remains deterministic, the risk score and pricing indication remain available, and documentary evidence can be empty. A RAG failure must never silently turn a decline into an acceptance, or bypass a referral rule.
+If the knowledge service is unavailable, times out, or returns no relevant citation, the underwriting decision remains deterministic, the risk score and pricing indication remain available, and documentary evidence can be empty (`evidence_retrieval_status` is then `UNAVAILABLE` or `INSUFFICIENT_CONTEXT`). A RAG failure must never silently turn a decline into an acceptance, or bypass a referral rule.
+
+## Data Analyst Agent Integration (Project 2)
+
+Project 4 does not run portfolio SQL itself. After the deterministic decision is complete, it calls Project 2 through `PortfolioAnalystPort`.
+
+```text
+Project 4 Underwriting Agent, http://127.0.0.1:8002
+        |
+        v
+HTTPPortfolioAnalyst
+        |
+        v
+Project 2 Data Analyst Agent, http://127.0.0.1:8003/v1/portfolio-quality-metrics
+        |
+        v
+UnderwritingDecision.portfolio_context
+```
+
+The context is provincial, all lines of business, and labelled as synthetic. It is for underwriter review only. If Project 2 is unreachable, times out, or has no row for the province, `portfolio_context.status` is `UNAVAILABLE` and the underwriting outcome is unchanged.
+
+## MCP Server
+
+The workflow is also exposed as a [Model Context Protocol](https://modelcontextprotocol.io) server over stdio, so MCP clients and agents can call it as tools. It reuses the same services as the REST API.
+
+```bash
+uv run underwriting-mcp
+```
+
+The process waits silently for MCP messages on stdin (logs go to stderr); it does not listen on a network port. Inspect it interactively with:
+
+```bash
+npx @modelcontextprotocol/inspector uv run underwriting-mcp
+```
+
+| Tool | Purpose | Persists |
+|---|---|---|
+| `extract_submission` | Extract candidate data from broker text through Project 1 | No |
+| `extract_and_evaluate` | Extract, map to the cyber model, and evaluate; accepts `overrides` for fields the extractor cannot provide | No |
+| `check_completeness` | List critical and optional missing fields | No |
+| `evaluate_underwriting` | Evaluate a structured submission | No |
+| `submit_underwriting` | Evaluate and persist the decision | **Yes** |
+| `get_decision` | Retrieve one persisted decision | No |
+| `get_audit_trail` | Retrieve the audit events of a decision | No |
+| `list_pending_reviews` | List decisions waiting for human review | No |
+
+Client configuration (Claude Desktop, Cursor, or any stdio MCP client):
+
+```json
+{
+  "mcpServers": {
+    "underwriting-agent": {
+      "command": "uv",
+      "args": [
+        "--directory",
+        "/absolute/path/to/underwriting-agent",
+        "run",
+        "underwriting-mcp"
+      ]
+    }
+  }
+}
+```
+
+Notes:
+
+- The server reads the same settings as the API. By default it uses the local SQLite database; set `DATABASE_URL` to share the PostgreSQL database of the platform.
+- The extraction tools call the Submission Extractor at `SUBMISSION_EXTRACTOR_BASE_URL` (default `http://127.0.0.1:8000`, published by the platform).
+- Evaluation tools attach Project 2 portfolio context from `PORTFOLIO_ANALYST_BASE_URL` (default `http://127.0.0.1:8003`) when that service is running.
+- `submit_underwriting` is the only tool that writes; grant it to an agent deliberately.
+- End-to-end check against the running platform: `uv run pytest -m e2e -k mcp -rs -v`.
 
 ## Submission Extractor Integration (Project 1)
 
 `POST /extract-and-underwrite` calls Project 1 through `SubmissionExtractorPort` (`http_client.py`) to convert raw broker text into a structured submission before underwriting proceeds. A correlation ID (`X-Correlation-ID` header) is generated or propagated end to end, and extraction failures degrade to an explicit `EXTRACTION_UNAVAILABLE` or `PENDING_INFORMATION` workflow status rather than a silent failure.
+The shared workflow lives in `application/extract_and_evaluate_service.py` and is used by both the REST API and the MCP tool `extract_and_evaluate`. Fields the extractor cannot provide are never invented; they come from `overrides` or are reported as missing.
 
 ## Project Boundaries
 
-| Project 4 owns | Project 3 owns | Project 1 owns |
-|---|---|---|
-| Submission validation | Insurance documents | Broker document parsing |
-| Completeness checks | Chunking and metadata | Field extraction |
-| Appetite and eligibility rules | E5 embeddings | Extraction review routing |
-| Referral and decline logic | Qdrant collection | Extraction confidence |
-| Risk scoring | Semantic retrieval | |
-| Pricing indication | Citation retrieval | |
-| Conditions recommendation | Grounded answer generation | |
-| Human-review routing and persistence | Document-level evidence | |
+| Project 4 owns | Project 3 owns | Project 1 owns | Project 2 owns |
+|---|---|---|---|
+| Submission validation | Insurance documents | Broker document parsing | Deterministic portfolio SQL |
+| Completeness checks | Chunking and metadata | Field extraction | Loss ratio and severity metrics |
+| Appetite and eligibility rules | E5 embeddings | Extraction review routing | Provincial aggregations |
+| Referral and decline logic | Qdrant collection | Extraction confidence | |
+| Risk scoring | Semantic retrieval | | |
+| Pricing indication | Citation retrieval | | |
+| Conditions recommendation | Grounded answer generation | | |
+| Human-review routing and persistence | Document-level evidence | | |
 
 ## Quality Checks
 
 ```bash
 uv run ruff format .
 uv run ruff check .
-uv run mypy src
-uv run pytest
+uv run mypy src tests
+uv run pytest                 # unit and integration tests; e2e tests are skipped
+uv run pytest -m e2e -rs -v   # end-to-end tests against the running platform (E2E_API_URL, default http://127.0.0.1:8002)
+
 ```
 
-The test suite includes unit and integration coverage for Pydantic submission validation, critical-field completeness checks, underwriting policy loading, deterministic rules and priority handling, cyber risk scoring and score caps, pricing calculations and minimum premium, condition recommendations, decision persistence and review workflow, submission-extractor HTTP client behavior, and FastAPI health, underwriting, and extraction endpoints.
+The test suite includes unit and integration coverage for Pydantic submission validation, critical-field completeness checks, underwriting policy loading, deterministic rules and priority handling, cyber risk scoring and score caps, pricing calculations and minimum premium, condition recommendations, decision persistence and review workflow, submission-extractor HTTP client behavior, portfolio-context fallback, MCP tools, PostgreSQL migrations, and FastAPI health, underwriting, and extraction endpoints.
 
 ## Docker
 
@@ -479,7 +612,7 @@ The test suite includes unit and integration coverage for Pydantic submission va
 docker compose up --build
 ```
 
-This service can also be orchestrated centrally by the `insurance-agentic-platform` Docker Compose project alongside Project 1 and Project 3.
+The local Compose file publishes the API on port `8002`. This service can also be orchestrated centrally by the `insurance-agentic-platform` Docker Compose project alongside Projects 1, 2, and 3.
 
 ## Design Principles
 
@@ -488,8 +621,8 @@ This service can also be orchestrated centrally by the `insurance-agentic-platfo
 - **Human-in-the-loop:** sensitive, high-risk, or out-of-authority risks are referred and persisted for review.
 - **Versioned policy:** decisions preserve `policy_version`, scoring version, and pricing version.
 - **Traceability:** outputs include rule results, factors, conditions, documentary evidence, and a full audit trail.
-- **Service isolation:** Projects 1 and 3 are accessed by HTTP rather than shared direct access to their internal data stores.
-- **Failure-safe behavior:** unavailable RAG evidence or extraction must not stop deterministic controls; they degrade to explicit statuses.
+- **Service isolation:** Projects 1, 2, and 3 are accessed by HTTP rather than shared direct access to their internal data stores.
+- **Failure-safe behavior:** unavailable RAG evidence, extraction, or portfolio context must not stop deterministic controls; they degrade to explicit statuses.
 - **Portfolio realism:** all data and business logic are explicitly synthetic.
 
 ## Roadmap
@@ -507,11 +640,11 @@ This service can also be orchestrated centrally by the `insurance-agentic-platfo
 - [x] Human-review workflow (`/decisions`, `/decisions/{id}/review`)
 - [x] Policy reconciliation between YAML rules and documentary sources (`docs/policy-reconciliation.md`)
 - [x] Raw document integration through Project 1 Submission Extractor (`/extract-and-underwrite`)
-- [ ] Retrieval status and failure metadata surfaced directly in the audit trail
-- [ ] Portfolio and claims analysis through Project 2 Data Analyst Agent
+- [x] Retrieval status and failure metadata surfaced in the audit trail (`DECISION_CREATED`)
+- [x] Assistive portfolio context through Project 2 Data Analyst Agent
 - [ ] LLM-generated underwriter summary using verified facts and citations only
 - [ ] LangGraph orchestration with conditional routing and human-review interruption
-- [ ] Full Docker Compose, observability, CI/CD, and deployment hardening at the platform level
+- [ ] Observability and deployment hardening at the platform level
 
 ## Position in the Insurance Agentic Platform
 
@@ -528,26 +661,25 @@ This service can also be orchestrated centrally by the `insurance-agentic-platfo
 | Area | Current | Recommended (2026) | Benefit |
 |---|---|---|---|
 | Orchestration | Sequential Python service calls | LangGraph with conditional routing and human-review interruption (already on roadmap) | Explicit graph-based control over referral pauses and multi-service retries |
-| Observability | No tracing | Langfuse or OpenTelemetry spanning `/underwrite`, `/extract-and-underwrite`, and downstream HTTP calls | End-to-end latency and failure visibility across Projects 1, 3, and 4 |
-| Persistence | SQLite via SQLAlchemy | PostgreSQL with SQLAlchemy 2.0 async, shared with Project 2's audit store | Concurrent access and cross-project decision analytics |
-| Resilience | Synchronous HTTP calls with timeouts | Circuit breaker and retry policy (e.g. `tenacity`) around the knowledge-agent and extractor clients | Reduces cascading failures when Project 1 or 3 is degraded |
+| Observability | No tracing | Langfuse or OpenTelemetry spanning `/underwrite`, `/extract-and-underwrite`, and downstream HTTP calls | End-to-end latency and failure visibility across Projects 1, 2, 3, and 4 |
+| Persistence | SQLite by default; Alembic + PostgreSQL when `DATABASE_URL` is Postgres | PostgreSQL as the shared platform store, SQLAlchemy 2.0 async | Concurrent access and cross-project decision analytics |
+| Resilience | Synchronous HTTP calls with timeouts | Circuit breaker and retry policy (e.g. `tenacity`) around the knowledge-agent, extractor, and portfolio clients | Reduces cascading failures when Project 1, 2, or 3 is degraded |
 | Summary generation | No LLM narrative | LLM-generated underwriter summary strictly from verified facts and citations (already on roadmap) | Faster underwriter review without weakening the deterministic core |
-| Deployment | Local `uvicorn` + `compose.yaml` per repo | Centralized `insurance-agentic-platform` Compose stack (already in progress) | Single command to run Projects 1, 3, and 4 together |
+| Deployment | Local `uvicorn` + per-repo `compose.yaml` and CI | Centralized `insurance-agentic-platform` Compose stack (already in progress) | Single command to run Projects 1, 2, 3, and 4 together |
 
 ## Improvements and Next Steps
 
 1. Close the remaining `docs/policy-reconciliation.md` "Pending alignment" items (for example `UW-CYB-001`, `UW-CYB-002`, `UW-CYB-004`) by adding documentary evidence to Project 3 or explicitly reclassifying the rules as internal authority controls.
-2. Surface Project 3 retrieval status (`SUCCESS`/`PARTIAL`/`INSUFFICIENT_CONTEXT`) directly in the persisted audit trail so reviewers can see when a decision relied on incomplete evidence.
-3. Implement the LangGraph orchestration already on the roadmap to make the referral pause and multi-service retry logic explicit and inspectable.
-4. Add a circuit breaker and retry policy around the Project 1 and Project 3 HTTP clients to harden the resilience principle already documented.
-5. Integrate Project 2 (Data Analyst Agent) so portfolio-level loss-ratio context can inform referral review, without changing the deterministic decision hierarchy.
-6. Migrate persistence from SQLite to PostgreSQL to support concurrent underwriters and shared analytics with Project 2.
+2. Implement the LangGraph orchestration already on the roadmap to make the referral pause and multi-service retry logic explicit and inspectable.
+3. Add a circuit breaker and retry policy around the Project 1, Project 2, and Project 3 HTTP clients to harden the resilience principle already documented.
+4. Add an LLM-generated underwriter summary strictly from verified facts and citations.
+5. Default the platform stack to PostgreSQL so concurrent underwriters share analytics with Project 2 (Alembic migrations already exist).
 
 ## Agentic AI Best Practices Applied Here
 
 - **Strict decision hierarchy**: input validation, completeness, decline, referral, scoring, and pricing are evaluated in a fixed deterministic order that no retrieval or generative component can bypass.
 - **RAG as evidence, not authority**: Project 3 citations explain a decision but cannot change it, directly mirroring current guidance that retrieval-augmented components should support, not replace, deterministic business logic.
-- **Explicit failure degradation across service boundaries**: unavailable knowledge-agent or extractor services produce explicit statuses (empty evidence, `EXTRACTION_UNAVAILABLE`) instead of silently failing open or closed.
+- **Explicit failure degradation across service boundaries**: unavailable knowledge-agent, extractor, or portfolio-analyst services produce explicit statuses (empty evidence, `EXTRACTION_UNAVAILABLE`, `portfolio_context.status=UNAVAILABLE`) instead of silently failing open or closed.
 - **Full audit trail and human-in-the-loop**: every decision, and every reviewer action on it, is persisted and retrievable, which is essential for a regulated, high-impact domain like underwriting.
 - **Governed rule provenance**: `docs/policy-reconciliation.md` formally classifies every executable rule against documentary sources, making rule authority auditable rather than implicit.
 - **Next practice to adopt**: wrap the multi-service workflow (extraction → underwriting → evidence retrieval → review) in an explicit orchestration graph (LangGraph) so pause points, retries, and human-review interrupts are first-class, versioned parts of the workflow rather than implicit control flow in `underwriting_service.py`.

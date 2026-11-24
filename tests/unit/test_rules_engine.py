@@ -1,3 +1,7 @@
+import pytest
+
+from underwriting_agent.application.underwriting_service import UnderwritingService
+from underwriting_agent.domain.enums import DecisionType
 from underwriting_agent.domain.rules import RuleSeverity
 from underwriting_agent.domain.submission import InsuranceSubmission
 from underwriting_agent.rules.engine import UnderwritingRulesEngine
@@ -112,3 +116,61 @@ def test_mfa_enabled_above_five_million_revenue_passes_requirement() -> None:
     mfa_rule = results[2]
 
     assert mfa_rule.passed is True
+
+
+@pytest.mark.parametrize(
+    "industry",
+    [
+        "Online casino and sports betting",
+        "Bitcoin mining operation",
+        "Crypto trading platform",
+        "Firearms manufacturer",
+        "Online gambling platform",
+        "Exploitation d'un casino",
+        "Fabrication d'armes à feu",
+    ],
+)
+def test_industry_alias_in_free_text_requires_referral(industry: str) -> None:
+    industry_rule = UnderwritingRulesEngine().evaluate(
+        build_submission(industry=industry)
+    )[1]
+
+    assert industry_rule.rule_id == "UW-CYB-002"
+    assert industry_rule.passed is False
+    assert industry_rule.severity == RuleSeverity.REFERRAL
+    assert "underwriter" in industry_rule.message
+
+
+@pytest.mark.parametrize(
+    "industry",
+    [
+        "Wholesale distribution",
+        "Mining equipment distributor",
+        "Pokerface Marketing agency",
+        "Armstrong Cleaning Services",
+        "Software for accounting firms",
+    ],
+)
+def test_unrelated_industry_text_passes(industry: str) -> None:
+    industry_rule = UnderwritingRulesEngine().evaluate(
+        build_submission(industry=industry)
+    )[1]
+
+    assert industry_rule.passed is True
+
+
+def test_exact_excluded_industry_is_still_declined_ignoring_case_and_spaces() -> None:
+    industry_rule = UnderwritingRulesEngine().evaluate(
+        build_submission(industry="  GAMBLING ")
+    )[1]
+
+    assert industry_rule.passed is False
+    assert industry_rule.severity == RuleSeverity.DECLINE
+
+
+def test_alias_match_leads_to_referral_decision() -> None:
+    decision = UnderwritingService().underwrite(
+        build_submission(industry="Online casino")
+    )
+
+    assert decision.decision is DecisionType.REFER

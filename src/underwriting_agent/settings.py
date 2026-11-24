@@ -16,7 +16,11 @@ class Settings(BaseSettings):
     )
 
     knowledge_agent_base_url: str = "http://127.0.0.1:8001"
-    knowledge_agent_timeout_seconds: float = 10.0
+    knowledge_agent_timeout_seconds: float = 20.0
+
+    portfolio_analyst_base_url: str = "http://127.0.0.1:8003"
+    portfolio_analyst_timeout_seconds: float = 30.0
+    portfolio_analyst_underwriting_years: list[int] = [2024, 2025]
 
     submission_extractor_base_url: str = "http://127.0.0.1:8000"
     submission_extractor_timeout_seconds: float = 30.0

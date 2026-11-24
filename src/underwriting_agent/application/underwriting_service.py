@@ -2,8 +2,13 @@ from underwriting_agent.application.completeness_service import CompletenessChec
 from underwriting_agent.application.conditions_service import (
     UnderwritingConditionsRecommender,
 )
+from underwriting_agent.domain.condition import UnderwritingCondition
 from underwriting_agent.domain.decision import UnderwritingDecision
 from underwriting_agent.domain.enums import DecisionType
+from underwriting_agent.domain.portfolio_context import (
+    PortfolioContext,
+    PortfolioContextStatus,
+)
 from underwriting_agent.domain.rules import RuleResult, RuleSeverity
 from underwriting_agent.domain.submission import InsuranceSubmission
 from underwriting_agent.integrations.knowledge_agent.no_op_client import (
@@ -11,6 +16,12 @@ from underwriting_agent.integrations.knowledge_agent.no_op_client import (
 )
 from underwriting_agent.integrations.knowledge_agent.port import (
     InsuranceKnowledgeAgentPort,
+)
+from underwriting_agent.integrations.portfolio_analyst.no_op_client import (
+    NoOpPortfolioAnalyst,
+)
+from underwriting_agent.integrations.portfolio_analyst.port import (
+    PortfolioAnalystPort,
 )
 from underwriting_agent.rules.engine import UnderwritingRulesEngine
 from underwriting_agent.scoring.pricing import CyberPricingIndicationService
@@ -26,6 +37,7 @@ class UnderwritingService:
         pricing_service: CyberPricingIndicationService | None = None,
         conditions_recommender: UnderwritingConditionsRecommender | None = None,
         knowledge_agent: InsuranceKnowledgeAgentPort | None = None,
+        portfolio_analyst: PortfolioAnalystPort | None = None,
     ) -> None:
         self.completeness_checker = completeness_checker or CompletenessChecker()
         self.rules_engine = rules_engine or UnderwritingRulesEngine()
@@ -42,8 +54,27 @@ class UnderwritingService:
         )
 
         self.knowledge_agent = knowledge_agent or NoOpInsuranceKnowledgeAgent()
+        self.portfolio_analyst = portfolio_analyst or NoOpPortfolioAnalyst()
 
     def underwrite(self, submission: InsuranceSubmission) -> UnderwritingDecision:
+        decision = self._underwrite_without_portfolio_context(submission)
+        portfolio_context = self._get_portfolio_context(submission)
+        return decision.model_copy(update={"portfolio_context": portfolio_context})
+
+    def _get_portfolio_context(
+        self, submission: InsuranceSubmission
+    ) -> PortfolioContext:
+        try:
+            return self.portfolio_analyst.get_portfolio_context(submission)
+        except Exception as error:  # noqa: BLE001 - context must never block a decision
+            return PortfolioContext(
+                status=PortfolioContextStatus.UNAVAILABLE,
+                failure_reason=str(error),
+            )
+
+    def _underwrite_without_portfolio_context(
+        self, submission: InsuranceSubmission
+    ) -> UnderwritingDecision:
         completeness_result = self.completeness_checker.check(submission)
 
         if not completeness_result.is_complete:
@@ -135,18 +166,28 @@ class UnderwritingService:
                 evidence_retrieval_failure_reason=(evidence_result.failure_reason),
             )
 
+        decision_type = (
+            DecisionType.ACCEPT_WITH_CONDITIONS if conditions else DecisionType.ACCEPT
+        )
+        reasons = [
+            "The submission satisfies the current eligibility and appetite rules."
+        ]
+        if conditions:
+            reasons.append(
+                f"Acceptance is subject to {len(conditions)} recommended condition(s)."
+            )
+        else:
+            reasons.append("No additional underwriting condition is required.")
+
         return UnderwritingDecision(
             submission_id=submission.submission_id,
-            decision=DecisionType.PENDING_UNDERWRITING,
+            decision=decision_type,
             human_review_required=False,
             risk_score=risk_score.score,
             risk_band=risk_score.risk_band,
             risk_factors=risk_score.factors,
             scoring_model_version=risk_score.scoring_model_version,
-            reasons=[
-                "The submission satisfies the current eligibility and appetite rules.",
-                "Risk scoring is complete and pricing evaluation is pending.",
-            ],
+            reasons=reasons,
             rule_results=rule_results,
             policy_version=self._policy_version(),
             base_exposure_premium_cad=pricing_indication.base_exposure_premium_cad,
@@ -173,3 +214,24 @@ class UnderwritingService:
             for rule in rule_results
             if rule.severity == severity and not rule.passed
         ]
+
+    @staticmethod
+    def _acceptance_decision(
+        conditions: list[UnderwritingCondition],
+    ) -> DecisionType:
+        if conditions:
+            return DecisionType.ACCEPT_WITH_CONDITIONS
+        return DecisionType.ACCEPT
+
+    @staticmethod
+    def _acceptance_reasons(conditions: list[UnderwritingCondition]) -> list[str]:
+        reasons = [
+            "The submission satisfies the current eligibility and appetite rules."
+        ]
+        if conditions:
+            reasons.append(
+                f"Acceptance is subject to {len(conditions)} recommended condition(s)."
+            )
+        else:
+            reasons.append("No additional underwriting condition is required.")
+        return reasons
