@@ -224,8 +224,7 @@ def test_underwrite_returns_need_more_information_for_incomplete_submission() ->
         "prior_cyber_claims",
     ]
 
-
-def test_underwrite_returns_pending_for_complete_submission() -> None:
+def test_underwrite_returns_accept_with_conditions_for_complete_submission() -> None:
     response = client.post(
         "/underwrite",
         json={
@@ -243,7 +242,13 @@ def test_underwrite_returns_pending_for_complete_submission() -> None:
     )
 
     assert response.status_code == 200
-    assert response.json()["decision"] == "PENDING_UNDERWRITING"
+
+    body = response.json()
+
+    assert body["decision"] == "ACCEPT_WITH_CONDITIONS"
+    assert body["human_review_required"] is False
+    assert len(body["conditions"]) >= 2
+
 
 
 def test_underwrite_persists_submission_and_decision() -> None:

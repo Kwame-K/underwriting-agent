@@ -2,6 +2,7 @@ from underwriting_agent.application.completeness_service import CompletenessChec
 from underwriting_agent.application.conditions_service import (
     UnderwritingConditionsRecommender,
 )
+from underwriting_agent.domain.condition import UnderwritingCondition
 from underwriting_agent.domain.decision import UnderwritingDecision
 from underwriting_agent.domain.enums import DecisionType
 from underwriting_agent.domain.portfolio_context import (
@@ -165,18 +166,28 @@ class UnderwritingService:
                 evidence_retrieval_failure_reason=(evidence_result.failure_reason),
             )
 
+        decision_type = (
+            DecisionType.ACCEPT_WITH_CONDITIONS if conditions else DecisionType.ACCEPT
+        )
+        reasons = [
+            "The submission satisfies the current eligibility and appetite rules."
+        ]
+        if conditions:
+            reasons.append(
+                f"Acceptance is subject to {len(conditions)} recommended condition(s)."
+            )
+        else:
+            reasons.append("No additional underwriting condition is required.")
+
         return UnderwritingDecision(
             submission_id=submission.submission_id,
-            decision=DecisionType.PENDING_UNDERWRITING,
+            decision=decision_type,
             human_review_required=False,
             risk_score=risk_score.score,
             risk_band=risk_score.risk_band,
             risk_factors=risk_score.factors,
             scoring_model_version=risk_score.scoring_model_version,
-            reasons=[
-                "The submission satisfies the current eligibility and appetite rules.",
-                "Risk scoring is complete and pricing evaluation is pending.",
-            ],
+            reasons=reasons,
             rule_results=rule_results,
             policy_version=self._policy_version(),
             base_exposure_premium_cad=pricing_indication.base_exposure_premium_cad,
@@ -203,3 +214,24 @@ class UnderwritingService:
             for rule in rule_results
             if rule.severity == severity and not rule.passed
         ]
+
+    @staticmethod
+    def _acceptance_decision(
+        conditions: list[UnderwritingCondition],
+    ) -> DecisionType:
+        if conditions:
+            return DecisionType.ACCEPT_WITH_CONDITIONS
+        return DecisionType.ACCEPT
+
+    @staticmethod
+    def _acceptance_reasons(conditions: list[UnderwritingCondition]) -> list[str]:
+        reasons = [
+            "The submission satisfies the current eligibility and appetite rules."
+        ]
+        if conditions:
+            reasons.append(
+                f"Acceptance is subject to {len(conditions)} recommended condition(s)."
+            )
+        else:
+            reasons.append("No additional underwriting condition is required.")
+        return reasons

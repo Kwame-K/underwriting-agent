@@ -58,7 +58,7 @@ def test_incomplete_submission_requires_more_information() -> None:
     ]
 
 
-def test_complete_submission_is_ready_for_underwriting() -> None:
+def test_complete_submission_with_control_gaps_is_accepted_with_conditions() -> None:
     submission = InsuranceSubmission(
         submission_id="SUB-UW-002",
         applicant_name="Acme Distribution Inc.",
@@ -74,9 +74,41 @@ def test_complete_submission_is_ready_for_underwriting() -> None:
 
     decision = UnderwritingService().underwrite(submission)
 
-    assert decision.decision == DecisionType.PENDING_UNDERWRITING
+    condition_ids = {condition.condition_id for condition in decision.conditions}
+
+    assert decision.decision == DecisionType.ACCEPT_WITH_CONDITIONS
     assert decision.human_review_required is False
     assert decision.missing_information == []
+    assert {"COND-002", "COND-003"} <= condition_ids
+    assert decision.indicated_premium_cad is not None
+
+
+def test_clean_submission_is_accepted_without_conditions() -> None:
+    submission = InsuranceSubmission(
+        submission_id="SUB-UW-ACCEPT-001",
+        applicant_name="Small Clean Inc.",
+        country="Canada",
+        industry="Wholesale distribution",
+        annual_revenue_cad=3_000_000,
+        employee_count=20,
+        handles_personal_data=False,
+        handles_payment_card_data=False,
+        mfa_enabled=True,
+        endpoint_detection_response=True,
+        offline_backups=True,
+        prior_cyber_claims=0,
+        requested_limit_cad=1_000_000,
+        requested_retention_cad=25_000,
+    )
+
+    decision = UnderwritingService().underwrite(submission)
+
+    assert decision.decision == DecisionType.ACCEPT
+    assert decision.human_review_required is False
+    assert decision.conditions == []
+    assert decision.indicated_premium_cad is not None
+    assert decision.evidence_retrieval_status == EvidenceRetrievalStatus.NOT_REQUESTED
+
 
 
 def test_excluded_industry_is_declined() -> None:

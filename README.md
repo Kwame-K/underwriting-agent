@@ -97,9 +97,9 @@ After the decision is formed, Project 2 portfolio context is attached as `portfo
 | `NEED_MORE_INFORMATION` | Critical submission data is missing; no risk decision can proceed |
 | `DECLINE` | The submission is outside the documented underwriting appetite |
 | `REFER` | The submission requires review by an authorized underwriter |
-| `PENDING_UNDERWRITING` | The submission meets current deterministic rules; later workflow stages may continue |
-| `ACCEPT_WITH_CONDITIONS` | Reserved for a later workflow stage with explicit approval authority |
-| `ACCEPT` | Reserved for a later workflow stage with explicit approval authority |
+| `ACCEPT` | The submission meets all deterministic rules and no condition is recommended |
+| `ACCEPT_WITH_CONDITIONS` | The submission meets all deterministic rules; recommended conditions must be satisfied before binding |
+| `PENDING_UNDERWRITING` | Legacy value, no longer produced by the current workflow |
 
 ## Repository Structure
 
